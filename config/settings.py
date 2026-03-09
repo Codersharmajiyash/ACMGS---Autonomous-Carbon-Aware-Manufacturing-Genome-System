@@ -28,7 +28,7 @@ ENERGY_INPUT_DIM = 1             # Univariate power signal
 ENERGY_HIDDEN_DIM = 64           # LSTM hidden units
 ENERGY_LATENT_DIM = 16           # Embedding size (the "DNA")
 ENERGY_NUM_LAYERS = 2            # LSTM layers
-ENERGY_EPOCHS = 50               # Training epochs
+ENERGY_EPOCHS = 100              # Training epochs
 ENERGY_BATCH_SIZE = 64           # Training batch size
 ENERGY_LEARNING_RATE = 1e-3
 ENERGY_ANOMALY_PERCENTILE = 95   # Reconstruction error threshold
@@ -45,12 +45,12 @@ GENOME_MATERIAL_FEATURES = [     # Material profile columns
 PRED_TARGETS = ["yield", "quality", "energy_consumption"]
 PRED_TEST_SIZE = 0.2
 PRED_RANDOM_STATE = 42
-PRED_N_ESTIMATORS = 200
-PRED_MAX_DEPTH = 6
+PRED_N_ESTIMATORS = 500
+PRED_MAX_DEPTH = 8
 
 # ─── Optimization Engine (Phase 5) ───────────────────────────────
-OPT_POPULATION_SIZE = 100
-OPT_NUM_GENERATIONS = 50
+OPT_POPULATION_SIZE = 200
+OPT_NUM_GENERATIONS = 100
 OPT_CROSSOVER_PROB = 0.8
 OPT_MUTATION_PROB = 0.2
 OPT_NUM_OBJECTIVES = 4          # yield, quality, energy, carbon

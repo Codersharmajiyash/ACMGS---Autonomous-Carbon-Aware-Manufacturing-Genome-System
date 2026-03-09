@@ -249,11 +249,18 @@ def select_best_schedule(df_pareto: pd.DataFrame, zone: str) -> Dict:
         
     else:  # MEDIUM
         # MEDIUM CARBON: Balanced optimization (efficiency mode)
+        # Normalize each objective to [0,1] so they contribute equally
+        for col in ["pred_yield", "pred_quality", "pred_energy", "pred_carbon"]:
+            col_min, col_max = df[col].min(), df[col].max()
+            col_range = col_max - col_min if col_max > col_min else 1.0
+            df[f"_norm_{col}"] = (df[col] - col_min) / col_range
         # Reward high yield/quality, penalize high energy/carbon
         df["score"] = (
-            df["pred_yield"] + df["pred_quality"] - 
-            df["pred_energy"] - df["pred_carbon"]
+            df["_norm_pred_yield"] + df["_norm_pred_quality"] -
+            df["_norm_pred_energy"] - df["_norm_pred_carbon"]
         )
+        # Clean up temporary normalization columns
+        df.drop(columns=[c for c in df.columns if c.startswith("_norm_")], inplace=True)
         best_idx = df["score"].idxmax()  # Find maximum balanced score
         logger.info(
             f"MEDIUM carbon zone → Selecting balanced configuration "

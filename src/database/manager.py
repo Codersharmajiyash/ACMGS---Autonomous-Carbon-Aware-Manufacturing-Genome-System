@@ -247,6 +247,26 @@ def load_genomes_from_npy(
     return len(rows)
 
 
+# ─── Phase 4 loader ───────────────────────────────────────────────────────────
+
+def load_predictions_from_csv(pred_path: Optional[str] = None) -> int:
+    """Insert Phase 4 predictions into the predictions table."""
+    path = pred_path or os.path.join(PROCESSED_DIR, "predictions.csv")
+    if not os.path.exists(path):
+        logger.warning("predictions.csv not found at %s — skipping", path)
+        return 0
+    df = pd.read_csv(path)
+    cols = ["batch_id", "pred_yield", "pred_quality", "pred_energy",
+            "actual_yield", "actual_quality", "actual_energy"]
+    df = df[cols]
+    with get_connection() as conn:
+        conn.execute("DELETE FROM predictions")
+        df.to_sql("predictions", conn, if_exists="append", index=False,
+                  method="multi", chunksize=500)
+    logger.info("Loaded %d predictions into DB", len(df))
+    return len(df)
+
+
 # ─── Phase 5 loader ───────────────────────────────────────────────────────────
 
 def load_pareto_from_csv(
@@ -420,6 +440,15 @@ def run_database_pipeline() -> dict:
     except Exception as e:
         logger.error("Failed to load genomes: %s", e)
         results["genome_vectors"] = 0
+
+    # Phase 4
+    try:
+        results["predictions"] = load_predictions_from_csv()
+        log_pipeline_run(4, "Prediction Models", "success",
+                         {"rows": results["predictions"]}, started)
+    except Exception as e:
+        logger.error("Failed to load predictions: %s", e)
+        results["predictions"] = 0
 
     # Phase 5 — wipe old pareto rows first so re-runs don't accumulate
     try:

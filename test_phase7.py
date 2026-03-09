@@ -85,6 +85,7 @@ summary = get_db_summary()
 check("batches: 2000 rows",          summary["batches"] == 2000,          f"{summary['batches']} rows")
 check("energy_embeddings: 2000 rows",summary["energy_embeddings"] == 2000, f"{summary['energy_embeddings']} rows")
 check("genome_vectors: 2000 rows",   summary["genome_vectors"] == 2000,   f"{summary['genome_vectors']} rows")
+check("predictions: 2000 rows",      summary["predictions"] == 2000,      f"{summary['predictions']} rows")
 check("pareto_solutions: 100 rows",  summary["pareto_solutions"] >= 100,  f"{summary['pareto_solutions']} rows")
 check("carbon_schedules: 3 rows",    summary["carbon_schedules"] == 3,    f"{summary['carbon_schedules']} rows")
 check("pipeline_runs: >= 1 row",     summary["pipeline_runs"] >= 1,       f"{summary['pipeline_runs']} rows")
@@ -166,7 +167,7 @@ with get_connection() as conn:
     ).fetchone()
 latest_run_id = latest_run["run_id"] if latest_run else None
 pareto_df = get_pareto_solutions(run_id=latest_run_id)
-check("get_pareto_solutions() returns DataFrame", len(pareto_df) == 100, f"{len(pareto_df)} rows")
+check("get_pareto_solutions() returns DataFrame", len(pareto_df) >= 100, f"{len(pareto_df)} rows")
 check("Pareto pred_carbon != 0.0",
       pareto_df["pred_carbon"].mean() > 50,
       f"mean={pareto_df['pred_carbon'].mean():.2f} gCO2/kWh")

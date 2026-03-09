@@ -73,9 +73,15 @@ def train_model(loader):
     # ADAM: ADAPTIVE LEARNING RATE OPTIMIZER ->  
     optimizer = torch.optim.Adam(model.parameters(),lr=ENERGY_LEARNING_RATE)
 
+    # Learning rate scheduler: reduce LR when loss plateaus
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-6
+    )
+
     # STEP-5 : Traininf Loop 
     model.train() # set to trainin mode (enbles dropout  etc. if any)
 
+    best_loss = float('inf')
     for epoch in range(ENERGY_EPOCHS):
         epoch_loss = 0.0
         num_batches = 0
@@ -96,6 +102,10 @@ def train_model(loader):
             epoch_loss += loss.item() # .item()converts tensor -> float
             num_batches +=1
         avg_loss = epoch_loss / num_batches
+        scheduler.step(avg_loss)
+
+        if avg_loss < best_loss:
+            best_loss = avg_loss
 
         if(epoch +1 ) % 10 == 0:
             logger.info(f"Epoch[{epoch+1:3d}/{ENERGY_EPOCHS}] | Avg Loss: {avg_loss:.6f}")

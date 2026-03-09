@@ -252,28 +252,38 @@ def build_predictor_evaluator() -> Callable[[Dict[str, float]], Dict[str, float]
 
     genome_mean = np.load(genome_path).mean(axis=0)  # shape (25,) — normalized
 
-    # Load normalization params to recover actual carbon_intensity scale
+    # Load normalization params so we can properly normalize process features
     norm_path = os.path.join(PROCESSED_DIR, "genome_normalization.npz")
     if os.path.exists(norm_path):
         norm = np.load(norm_path)
-        # Denormalize dim 24 (carbon): actual_mean = norm_mean[24]
-        carbon_intensity_raw = float(norm["mean"][24])
+        norm_mean = norm["mean"]   # shape (25,)
+        norm_std = norm["std"]     # shape (25,)
+        carbon_intensity_raw = float(norm_mean[24])
     else:
-        carbon_intensity_raw = 300.0  # fallback: typical grid carbon value
+        norm_mean = None
+        norm_std = None
+        carbon_intensity_raw = 300.0
 
     logger.info("Phase 4 predictor loaded for optimization")
     logger.info("Carbon intensity reference: %.2f gCO2/kWh", carbon_intensity_raw)
 
     def predictor_evaluator(params: Dict[str, float]) -> Dict[str, float]:
         genome_vec = genome_mean.copy()
+        # Inject process parameters, properly normalized to z-score space
         for i, name in enumerate(GENOME_PROCESS_FEATURES):
-            genome_vec[i] = params[name]
+            raw_val = params[name]
+            if norm_mean is not None and norm_std is not None and norm_std[i] > 0:
+                genome_vec[i] = (raw_val - norm_mean[i]) / norm_std[i]
+            else:
+                genome_vec[i] = raw_val
         prediction = model.predict(genome_vec.reshape(1, -1))[0]  # shape (3,)
+        # Carbon footprint = predicted energy (kWh) * grid carbon intensity (gCO2/kWh) / 1000 -> kg CO2
+        carbon_footprint = float(prediction[2]) * (carbon_intensity_raw / 1000.0)
         return {
             "yield": float(prediction[0]),
             "quality": float(prediction[1]),
             "energy_consumption": float(prediction[2]),
-            "carbon_intensity": carbon_intensity_raw,
+            "carbon_intensity": carbon_footprint,
         }
 
     return predictor_evaluator

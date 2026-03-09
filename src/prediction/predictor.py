@@ -220,13 +220,19 @@ def create_predictor_model(use_xgboost=None):
         raise ValueError("XGBoost not available. Install or set use_xgboost=False")
     
     if use_xgboost:
-        # XGBoost model (faster, often more accurate)
+        # XGBoost model with tuned hyperparameters
         base_model = xgb.XGBRegressor(
             n_estimators=PRED_N_ESTIMATORS,
             max_depth=PRED_MAX_DEPTH,
-            learning_rate=0.1,
+            learning_rate=0.08,
+            subsample=0.85,
+            colsample_bytree=0.85,
+            reg_alpha=0.005,
+            reg_lambda=0.8,
+            min_child_weight=2,
+            gamma=0.01,
             random_state=PRED_RANDOM_STATE,
-            n_jobs=-1  # Use all CPU cores
+            n_jobs=-1
         )
         model_type = "XGBoost"
     else:
@@ -515,7 +521,28 @@ def run_prediction_pipeline(use_xgboost=None, save_results=True):
         
         # Make predictions on test set for return
         y_pred = model.predict(X_test)
-        
+
+        # Save full predictions CSV (all batches) for Phase 7 DB ingestion
+        if save_results:
+            try:
+                batch_csv = os.path.join(SIMULATED_DIR, "batch_data.csv")
+                df_batches = pd.read_csv(batch_csv)[["batch_id", "yield", "quality", "energy_consumption"]]
+                y_all = model.predict(X)
+                df_pred = pd.DataFrame({
+                    "batch_id":    df_batches["batch_id"].values,
+                    "pred_yield":  y_all[:, 0],
+                    "pred_quality": y_all[:, 1],
+                    "pred_energy": y_all[:, 2],
+                    "actual_yield":   df_batches["yield"].values,
+                    "actual_quality": df_batches["quality"].values,
+                    "actual_energy":  df_batches["energy_consumption"].values,
+                })
+                pred_csv = os.path.join(PROCESSED_DIR, "predictions.csv")
+                df_pred.to_csv(pred_csv, index=False)
+                logger.info("Saved %d predictions to %s", len(df_pred), pred_csv)
+            except Exception as e:
+                logger.warning("Could not save predictions CSV: %s", e)
+
         logger.info("=" * 60)
         logger.info("✓ PHASE 4: COMPLETE")
         logger.info("=" * 60)

@@ -229,7 +229,7 @@ body = r.json()
 check("batches = 2000",               body.get("batches") == 2000,    str(body.get("batches")))
 check("energy_embeddings = 2000",     body.get("energy_embeddings") == 2000)
 check("genome_vectors = 2000",        body.get("genome_vectors") == 2000)
-check("pareto_solutions = 100",       body.get("pareto_solutions") == 100)
+check("pareto_solutions >= 100",       body.get("pareto_solutions",0) >= 100)
 check("carbon_schedules = 3",         body.get("carbon_schedules") == 3)
 check("pipeline_runs >= 1",           body.get("pipeline_runs",0) >= 1)
 check("db_size_bytes >= 1MB",         body.get("db_size_bytes",0) >= 1_000_000,
