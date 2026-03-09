@@ -29,3 +29,6 @@
 2026-03-05 15:46:16 | INFO     | energy_dna           | ENERGY DNA PIPLINE STARTING
 2026-03-05 15:46:16 | INFO     | energy_dna           | ==================================================
 2026-03-05 15:46:16 | INFO     | energy_dna           | Signals Loaded shape:(2000, 128, 1)
+2026-03-09 10:29:33 | INFO     | carbon_scheduler.scheduler | ================================================================================
+2026-03-09 10:29:33 | INFO     | carbon_scheduler.scheduler | STARTING CARBON-AWARE SCHEDULER PIPELINE (PHASE 6)
+2026-03-09 10:29:33 | INFO     | carbon_scheduler.scheduler | ================================================================================
