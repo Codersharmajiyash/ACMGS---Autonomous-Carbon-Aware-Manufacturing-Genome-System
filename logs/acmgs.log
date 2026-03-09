@@ -25,3 +25,7 @@
 2026-03-04 18:51:58 | INFO     | energy_dna           | Anomaly threshold(p95): 0.210434
 2026-03-04 18:51:58 | INFO     | energy_dna           | Anomalies flagged:100/ 2000
 2026-03-04 18:51:58 | INFO     | energy_dna           | PHASE 2:COMPLETE
+2026-03-05 15:46:16 | INFO     | energy_dna           | ==================================================
+2026-03-05 15:46:16 | INFO     | energy_dna           | ENERGY DNA PIPLINE STARTING
+2026-03-05 15:46:16 | INFO     | energy_dna           | ==================================================
+2026-03-05 15:46:16 | INFO     | energy_dna           | Signals Loaded shape:(2000, 128, 1)
