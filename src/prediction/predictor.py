@@ -20,7 +20,7 @@ APPROACH:
   - Comprehensive metrics (MAE, RMSE, R²)
 
 INPUT:
-  - X: Genome vectors from Phase 3 (2000 × 25)
+  - X: Genome vectors from Phase 3 (2000 × 25)q
   - y: Target values from Phase 1 (2000 × 3)
 
 OUTPUT:

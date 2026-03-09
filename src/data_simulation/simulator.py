@@ -229,5 +229,9 @@ def generate_full_dataset():
 #     print(f"\nColumns: {list(df.columns)}")
 #     print(f"\nFirst row:\n{df.iloc[0]}")
 
+if __name__ == "__main__":
+    df, signals = generate_full_dataset()
+    logger.info(f"Phase 1 complete. DataFrame: {df.shape}, Signals: {signals.shape}")
+
 
 

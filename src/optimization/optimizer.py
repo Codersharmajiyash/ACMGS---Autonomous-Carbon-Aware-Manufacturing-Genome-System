@@ -250,8 +250,19 @@ def build_predictor_evaluator() -> Callable[[Dict[str, float]], Dict[str, float]
     with open(model_path, "rb") as f:
         model = pickle.load(f)
 
-    genome_mean = np.load(genome_path).mean(axis=0)  # shape (25,)
+    genome_mean = np.load(genome_path).mean(axis=0)  # shape (25,) — normalized
+
+    # Load normalization params to recover actual carbon_intensity scale
+    norm_path = os.path.join(PROCESSED_DIR, "genome_normalization.npz")
+    if os.path.exists(norm_path):
+        norm = np.load(norm_path)
+        # Denormalize dim 24 (carbon): actual_mean = norm_mean[24]
+        carbon_intensity_raw = float(norm["mean"][24])
+    else:
+        carbon_intensity_raw = 300.0  # fallback: typical grid carbon value
+
     logger.info("Phase 4 predictor loaded for optimization")
+    logger.info("Carbon intensity reference: %.2f gCO2/kWh", carbon_intensity_raw)
 
     def predictor_evaluator(params: Dict[str, float]) -> Dict[str, float]:
         genome_vec = genome_mean.copy()
@@ -262,7 +273,7 @@ def build_predictor_evaluator() -> Callable[[Dict[str, float]], Dict[str, float]
             "yield": float(prediction[0]),
             "quality": float(prediction[1]),
             "energy_consumption": float(prediction[2]),
-            "carbon_intensity": float(genome_mean[24]),
+            "carbon_intensity": carbon_intensity_raw,
         }
 
     return predictor_evaluator
@@ -281,12 +292,18 @@ def run_optimization_phase() -> OptimizationResult:
     # Add material feature mean values and carbon_intensity from genome reference
     genome_path = os.path.join(PROCESSED_DIR, "genome_vectors.npy")
     if os.path.exists(genome_path):
-        genome_mean = np.load(genome_path).mean(axis=0)
-        for i, col in enumerate(GENOME_MATERIAL_FEATURES):
-            pareto_df[col] = genome_mean[5 + i]
-        pareto_df["carbon_intensity"] = genome_mean[24]
+        genome_mean = np.load(genome_path).mean(axis=0)  # normalized mean
+        # Denormalize material features using normalization params
+        norm_path = os.path.join(PROCESSED_DIR, "genome_normalization.npz")
+        if os.path.exists(norm_path):
+            norm = np.load(norm_path)
+            for i, col in enumerate(GENOME_MATERIAL_FEATURES):
+                pareto_df[col] = float(norm["mean"][5 + i])
+        else:
+            for i, col in enumerate(GENOME_MATERIAL_FEATURES):
+                pareto_df[col] = genome_mean[5 + i]
     else:
-        logger.warning("genome_vectors.npy not found — material cols and carbon_intensity won't be in pareto output")
+        logger.warning("genome_vectors.npy not found — material cols won't be in pareto output")
 
     # Rename columns to match Phase 6 scheduler expectations
     pareto_df = pareto_df.rename(columns={
