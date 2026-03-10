@@ -76,3 +76,7 @@ __pycache__/
 logs/
 .venv/
 final_check_output.txt
+__pycache__/
+*.pyc
+*.db
+logs/
