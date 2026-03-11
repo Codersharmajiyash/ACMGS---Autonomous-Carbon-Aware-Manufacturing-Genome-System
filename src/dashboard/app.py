@@ -1522,6 +1522,45 @@ with tab6:
         unsafe_allow_html=True,
     )
 
+    # ── Simulate New Batch button ─────────────────────────────────────────
+    _sim_col, _ = st.columns([1, 5])
+    with _sim_col:
+        if st.button("+ Simulate New Batch", key="dt_sim_batch",
+                     help="Insert a new simulated batch into the DB and refresh"):
+            import random as _rnd
+            _sim_conn = sqlite3.connect(DB_PATH)
+            _last_id  = _sim_conn.execute(
+                "SELECT batch_id FROM batches ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            _next_num = int(_last_id[0].split("_")[1]) + 1 if _last_id else 2000
+            _new_id   = f"BATCH_{_next_num}"
+            _sim_conn.execute(
+                """INSERT INTO batches
+                   (batch_id, temperature, pressure, speed, feed_rate, humidity,
+                    material_density, material_hardness, material_grade,
+                    yield, quality, energy_consumption, carbon_intensity, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
+                (
+                    _new_id,
+                    round(_rnd.uniform(150.0, 350.0), 4),
+                    round(_rnd.uniform(1.0,   10.0),  4),
+                    round(_rnd.uniform(500.0, 3000.0),4),
+                    round(_rnd.uniform(0.1,   1.0),   4),
+                    round(_rnd.uniform(20.0,  80.0),  4),
+                    round(_rnd.uniform(2.0,   5.0),   4),
+                    round(_rnd.uniform(10.0,  60.0),  4),
+                    _rnd.randint(1, 5),
+                    round(_rnd.uniform(0.3,   1.0),   4),
+                    round(_rnd.uniform(0.3,   1.0),   4),
+                    round(_rnd.uniform(100.0, 500.0), 4),
+                    round(_rnd.uniform(200.0, 600.0), 4),
+                ),
+            )
+            _sim_conn.commit()
+            _sim_conn.close()
+            _load_batches.clear()
+            st.rerun()
+
     # ══════════════════════════════════════════════════════════════════════
     # SECTION 2 &#10143; LIVE MACHINE GAUGES + TREND
     # ══════════════════════════════════════════════════════════════════════
@@ -1566,12 +1605,12 @@ with tab6:
     if _latest is not None:
         with _gc1:
             st.plotly_chart(
-                _dt_gauge(float(_latest["temperature"]), 100, 300, "Temperature", "degC", _CYAN),
+                _dt_gauge(float(_latest["temperature"]), 100, 350, "Temperature", "degC", _CYAN),
                 use_container_width=True, config={"displayModeBar": False},
             )
         with _gc2:
             st.plotly_chart(
-                _dt_gauge(float(_latest["speed"]), 50, 300, "Speed", "rpm", _GREEN),
+                _dt_gauge(float(_latest["speed"]), 500, 3000, "Speed", "rpm", _GREEN),
                 use_container_width=True, config={"displayModeBar": False},
             )
         with _gc3:
@@ -1601,9 +1640,9 @@ with tab6:
                            font=dict(size=11, color="rgba(255,255,255,0.45)")),
                 xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickfont=dict(size=8)),
                 yaxis=dict(gridcolor="rgba(255,255,255,0.07)", tickfont=dict(size=8)),
-                legend=dict(bgcolor="rgba(0,0,0,0.25)", bordercolor="rgba(255,255,255,0.1)",
-                            borderwidth=1, orientation="h", yanchor="bottom", y=1.01, x=0),
-                height=230, margin=dict(l=10, r=10, t=44, b=10),
+                legend=dict(bgcolor="rgba(0,0,0,0.35)", bordercolor="rgba(255,255,255,0.1)",
+                            borderwidth=1, orientation="h", yanchor="bottom", y=1.08, x=1, xanchor="right"),
+                height=230, margin=dict(l=10, r=10, t=52, b=10),
             )
             st.plotly_chart(_ftrd, use_container_width=True, config={"displayModeBar": False})
     else:
