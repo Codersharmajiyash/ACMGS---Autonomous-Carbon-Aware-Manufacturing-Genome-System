@@ -39,7 +39,7 @@ chk("GET /genome/BATCH_0001", r.status_code, f'dims={d.get("dims")}' if r.status
 
 # 4. /schedule LOW (80 gCO2)
 r = client.get("/schedule/80")
-d = r.json()
+d = r.json()        
 chk("GET /schedule/80  [LOW]", r.status_code,
     f'zone={d.get("zone")}  yield={d.get("schedule_pred_yield",0):.3f}' if r.status_code==200 else str(d))
 

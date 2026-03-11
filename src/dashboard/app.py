@@ -1405,7 +1405,9 @@ with tab5:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab6:
 
-    # ── Load all DT data ───────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # DATA LOAD — Digital Twin
+    # ─────────────────────────────────────────────────────────────────────────
     try:
         _dt_conn = sqlite3.connect(DB_PATH)
         _dt_anomaly_count = _dt_conn.execute(
@@ -1415,864 +1417,954 @@ with tab6:
             "SELECT batch_id, recon_error, is_anomaly FROM energy_embeddings ORDER BY rowid",
             _dt_conn,
         )
-        df_dt_genome_anom = pd.read_sql_query(
-            """SELECT gv.batch_id, gv.genome, ee.is_anomaly
-               FROM genome_vectors gv
-               JOIN energy_embeddings ee ON gv.batch_id = ee.batch_id""",
-            _dt_conn,
-        )
         _dt_conn.close()
         df_dt_health["recon_error"] = pd.to_numeric(df_dt_health["recon_error"], errors="coerce")
-        df_dt_health["is_anomaly"]  = pd.to_numeric(df_dt_health["is_anomaly"],  errors="coerce").fillna(0).astype(int)
-        df_dt_genome_anom["is_anomaly"] = pd.to_numeric(df_dt_genome_anom["is_anomaly"], errors="coerce").fillna(0).astype(int)
+        df_dt_health["is_anomaly"]  = (
+            pd.to_numeric(df_dt_health["is_anomaly"], errors="coerce").fillna(0).astype(int)
+        )
     except Exception:
         _dt_anomaly_count = 0
         df_dt_health = pd.DataFrame(columns=["batch_id", "recon_error", "is_anomaly"])
-        df_dt_genome_anom = pd.DataFrame(columns=["batch_id", "genome", "is_anomaly"])
 
-    _dt_total      = db_summary.get("batches", 0)
-    _dt_avg_yield  = df_preds["pred_yield"].mean() if len(df_preds) > 0 else 0.0
-    _dt_avg_energy = df_batches["energy_consumption"].mean() if len(df_batches) > 0 else 0.0
-    _dt_anom_rate  = _dt_anomaly_count / max(_dt_total, 1) * 100
+    _nb          = len(df_batches)
+    _dt_total    = db_summary.get("batches", 0)
+    _anom_rate   = _dt_anomaly_count / max(_dt_total, 1) * 100
+    _avg_yield   = float(df_preds["pred_yield"].mean())            if len(df_preds) > 0   else 0.0
+    _avg_quality = float(df_preds["pred_quality"].mean())          if len(df_preds) > 0   else 0.0
+    _avg_energy  = float(df_batches["energy_consumption"].mean())  if _nb > 0             else 0.0
+    _latest      = df_batches.iloc[-1] if _nb > 0 else None
 
-    if _dt_anom_rate > 15:
-        _dt_fstatus = "CRITICAL"; _dt_fc = _RED
-        _dt_fbg = "rgba(255,75,75,0.08)"; _dt_fbd = "rgba(255,75,75,0.35)"; _dt_fi = "🔴"
-    elif _dt_anom_rate > 7:
-        _dt_fstatus = "DEGRADED"; _dt_fc = _YELLOW
-        _dt_fbg = "rgba(255,214,0,0.08)"; _dt_fbd = "rgba(255,214,0,0.35)"; _dt_fi = "🟡"
+    # Factory health level
+    if _anom_rate > 15:
+        _fstate, _fc, _fbg, _fbd, _fpulse, _ficon = (
+            "CRITICAL", _RED,
+            "rgba(255,75,75,0.09)", "rgba(255,75,75,0.38)",
+            "#ff4b4b", "&#128308;",   # red circle HTML entity
+        )
+    elif _anom_rate > 7:
+        _fstate, _fc, _fbg, _fbd, _fpulse, _ficon = (
+            "DEGRADED", _YELLOW,
+            "rgba(255,214,0,0.09)", "rgba(255,214,0,0.38)",
+            "#ffd600", "&#128993;",   # yellow circle
+        )
     else:
-        _dt_fstatus = "ONLINE"; _dt_fc = _GREEN
-        _dt_fbg = "rgba(0,255,136,0.08)"; _dt_fbd = "rgba(0,255,136,0.35)"; _dt_fi = "🟢"
+        _fstate, _fc, _fbg, _fbd, _fpulse, _ficon = (
+            "ONLINE", _GREEN,
+            "rgba(0,255,136,0.09)", "rgba(0,255,136,0.38)",
+            "#00ff88", "&#128994;",   # green circle
+        )
 
-    _dt_latest = df_batches.iloc[-1] if len(df_batches) > 0 else None
+    _lat_id  = str(_latest["batch_id"])           if _latest is not None else "N/A"
+    _lat_ci  = float(_latest["carbon_intensity"]) if _latest is not None else 0.0
+    _lat_zone = classify_carbon_zone(_lat_ci)     if _latest is not None else zone
 
-    # ══ STATUS BANNER ══════════════════════════════════════════════════════════
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 1 &#10143; FACTORY HEALTH CARD
+    # ══════════════════════════════════════════════════════════════════════
     st.markdown(
-        f'<div style="background:{_dt_fbg};border:1px solid {_dt_fbd};border-radius:12px;'
-        f'padding:14px 24px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;">'
-        f'<div>'
-        f'<div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.15em;color:rgba(255,255,255,0.35);">Digital Twin · Live Mirror</div>'
-        f'<div style="font-size:1.5rem;font-weight:700;color:{_dt_fc};letter-spacing:0.06em;margin-top:2px;">'
-        f'{_dt_fi} FACTORY {_dt_fstatus}</div>'
-        f'</div>'
-        f'<div style="text-align:right;">'
-        f'<div style="font-size:0.82rem;color:rgba(255,255,255,0.45);">'
-        f'Mirroring {_dt_total:,} batches &nbsp;·&nbsp; {len(df_dt_health):,} embeddings analysed</div>'
-        f'<div style="font-size:0.8rem;color:{_dt_fc};margin-top:4px;">'
-        f'Anomaly Rate: {_dt_anom_rate:.1f}% &nbsp;·&nbsp; Active Zone: {ZONE_EMOJI[zone]} {zone} &nbsp;·&nbsp; CI: {carbon_val} gCO₂/kWh'
-        f'</div></div></div>',
+        f"""
+<style>
+@keyframes dt_pulse {{
+  0%,100%{{box-shadow:0 0 0 0 {_fpulse}66;}}
+  50%{{box-shadow:0 0 0 12px {_fpulse}00;}}
+}}
+.dt_kpi_pill {{
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.11);
+  border-radius:20px;padding:5px 16px;
+  font-size:0.73rem;font-weight:600;
+  color:rgba(255,255,255,0.7);margin:3px 4px;
+  letter-spacing:0.04em;
+}}
+.dt_kpi_dot {{width:7px;height:7px;border-radius:50%;display:inline-block;}}
+</style>
+<div style="background:linear-gradient(135deg,{_fbg},{_fbg.replace('0.09','0.03')});
+     border:1px solid {_fbd};border-radius:16px;padding:24px 28px;margin-bottom:22px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;
+       flex-wrap:wrap;gap:14px;">
+    <div style="display:flex;align-items:center;gap:18px;">
+      <div style="width:56px;height:56px;border-radius:50%;
+           background:{_fbg};border:2px solid {_fbd};
+           display:flex;align-items:center;justify-content:center;
+           font-size:1.8rem;animation:dt_pulse 2.2s infinite;">{_ficon}</div>
+      <div>
+        <div style="font-size:0.58rem;text-transform:uppercase;letter-spacing:0.18em;
+             color:rgba(255,255,255,0.3);margin-bottom:3px;">
+          ACMGS Digital Twin &nbsp;&#183;&nbsp; Live Factory Mirror</div>
+        <div style="font-size:1.9rem;font-weight:800;color:{_fc};
+             letter-spacing:0.05em;line-height:1.1;">FACTORY {_fstate}</div>
+        <div style="font-size:0.78rem;color:rgba(255,255,255,0.38);margin-top:4px;">
+          Latest batch&nbsp;{_lat_id}&nbsp;&#183;&nbsp;
+          Carbon&nbsp;{_lat_ci:.0f}&nbsp;gCO&#8322;/kWh&nbsp;&#183;&nbsp;
+          Zone&nbsp;{_lat_zone}</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:2px;">
+      <div class="dt_kpi_pill">
+        <span class="dt_kpi_dot" style="background:{_GREEN};"></span>
+        {_dt_total:,} Batches</div>
+      <div class="dt_kpi_pill">
+        <span class="dt_kpi_dot" style="background:{_RED};"></span>
+        {_dt_anomaly_count} Anomalies&nbsp;({_anom_rate:.1f}%)</div>
+      <div class="dt_kpi_pill">
+        <span class="dt_kpi_dot" style="background:{_CYAN};"></span>
+        Avg Yield&nbsp;{_avg_yield:.4f}</div>
+      <div class="dt_kpi_pill">
+        <span class="dt_kpi_dot" style="background:{_PURPLE};"></span>
+        Avg Quality&nbsp;{_avg_quality:.4f}</div>
+      <div class="dt_kpi_pill">
+        <span class="dt_kpi_dot" style="background:{_YELLOW};"></span>
+        Avg Energy&nbsp;{_avg_energy:.0f}&nbsp;kWh</div>
+    </div>
+  </div>
+</div>""",
         unsafe_allow_html=True,
     )
 
-    # ══ COMMAND PANEL KPIs ═════════════════════════════════════════════════════
-    st.markdown('<div class="slabel">Command Panel</div>', unsafe_allow_html=True)
-    _cp1, _cp2, _cp3, _cp4, _cp5 = st.columns(5)
-    with _cp1:
-        st.metric("🏭 Batches Processed", f"{_dt_total:,}", "production records")
-    with _cp2:
-        st.metric("⚠️ Anomalies Detected", f"{_dt_anomaly_count:,}",
-                  f"{_dt_anom_rate:.1f}% rate", delta_color="inverse")
-    with _cp3:
-        st.metric("🎯 Fleet Avg Yield", f"{_dt_avg_yield:.4f}", "AI model")
-    with _cp4:
-        st.metric(f"{ZONE_EMOJI[zone]} Carbon Zone", zone, f"{carbon_val} gCO₂/kWh")
-    with _cp5:
-        st.metric("⚡ Avg Energy / Batch", f"{_dt_avg_energy:.0f} kWh", "fleet avg")
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 2 &#10143; LIVE MACHINE GAUGES + TREND
+    # ══════════════════════════════════════════════════════════════════════
+    st.markdown(
+        '<div class="slabel">&#9889; Live Machine State &#8212; Current Batch Gauges + 300-Batch Trend</div>',
+        unsafe_allow_html=True,
+    )
+
+    def _dt_gauge(val, lo, hi, label, unit, col):
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=val,
+            title=dict(
+                text=f"{label}<br><span style='font-size:0.72em;"
+                     f"color:rgba(255,255,255,0.35);'>{unit}</span>",
+                font=dict(size=12, color="rgba(255,255,255,0.5)"),
+            ),
+            number=dict(font=dict(size=40, color=col, family="JetBrains Mono,monospace")),
+            gauge=dict(
+                axis=dict(range=[lo, hi], tickwidth=1,
+                          tickcolor="rgba(255,255,255,0.15)",
+                          tickfont=dict(color="rgba(255,255,255,0.28)", size=7),
+                          nticks=5),
+                bar=dict(color=col, thickness=0.21),
+                bgcolor="rgba(255,255,255,0.02)",
+                borderwidth=1, bordercolor="rgba(255,255,255,0.06)",
+                steps=[
+                    dict(range=[lo,                    lo+(hi-lo)*0.4],  color="rgba(0,255,136,0.07)"),
+                    dict(range=[lo+(hi-lo)*0.4,        lo+(hi-lo)*0.75], color="rgba(255,214,0,0.06)"),
+                    dict(range=[lo+(hi-lo)*0.75, hi],                    color="rgba(255,75,75,0.08)"),
+                ],
+            ),
+        ))
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="rgba(255,255,255,0.6)", family="Inter"),
+            height=230, margin=dict(l=20, r=20, t=30, b=8),
+        )
+        return fig
+
+    _gc1, _gc2, _gc3, _gtrd = st.columns([2, 2, 2, 4])
+    if _latest is not None:
+        with _gc1:
+            st.plotly_chart(
+                _dt_gauge(float(_latest["temperature"]), 100, 300, "Temperature", "degC", _CYAN),
+                use_container_width=True, config={"displayModeBar": False},
+            )
+        with _gc2:
+            st.plotly_chart(
+                _dt_gauge(float(_latest["speed"]), 50, 300, "Speed", "rpm", _GREEN),
+                use_container_width=True, config={"displayModeBar": False},
+            )
+        with _gc3:
+            st.plotly_chart(
+                _dt_gauge(float(_latest["pressure"]), 1, 10, "Pressure", "bar", _ORANGE),
+                use_container_width=True, config={"displayModeBar": False},
+            )
+        with _gtrd:
+            _tdf = df_batches.tail(300).reset_index(drop=True)
+            _ftrd = go.Figure()
+            _ftrd.add_trace(go.Scatter(
+                x=list(range(len(_tdf))), y=_tdf["yield"].tolist(),
+                mode="lines", name="Yield",
+                line=dict(color=_CYAN, width=1.4),
+                hovertemplate="Batch +%{x}<br>Yield: %{y:.4f}<extra></extra>",
+            ))
+            _ftrd.add_trace(go.Scatter(
+                x=list(range(len(_tdf))), y=_tdf["quality"].tolist(),
+                mode="lines", name="Quality",
+                line=dict(color=_GREEN, width=1.4),
+                hovertemplate="Batch +%{x}<br>Quality: %{y:.4f}<extra></extra>",
+            ))
+            _ftrd.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.015)",
+                font=dict(color="rgba(255,255,255,0.6)", family="Inter"),
+                title=dict(text="300-Batch Yield & Quality Trend",
+                           font=dict(size=11, color="rgba(255,255,255,0.45)")),
+                xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickfont=dict(size=8)),
+                yaxis=dict(gridcolor="rgba(255,255,255,0.07)", tickfont=dict(size=8)),
+                legend=dict(bgcolor="rgba(0,0,0,0.25)", bordercolor="rgba(255,255,255,0.1)",
+                            borderwidth=1, orientation="h", yanchor="bottom", y=1.01, x=0),
+                height=230, margin=dict(l=10, r=10, t=44, b=10),
+            )
+            st.plotly_chart(_ftrd, use_container_width=True, config={"displayModeBar": False})
+    else:
+        st.info("No batch data available.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ══ LIVE FACTORY FLOOR ═════════════════════════════════════════════════════
-    st.markdown('<div class="slabel">Live Factory Floor — 6-Station Production Line</div>',
-                unsafe_allow_html=True)
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 3 &#10143; FACTORY PIPELINE VISUALIZATION
+    # ══════════════════════════════════════════════════════════════════════
+    st.markdown(
+        '<div class="slabel">&#127981; Factory Pipeline &#8212; Current Batch State Across All Stations</div>',
+        unsafe_allow_html=True,
+    )
 
-    if _dt_latest is not None:
-        _lat_id   = _dt_latest["batch_id"]
-        _lat_anom = False
-        if len(df_dt_health) > 0:
-            _lmatch = df_dt_health[df_dt_health["batch_id"] == _lat_id]
-            if len(_lmatch) > 0:
-                _lat_anom = bool(_lmatch.iloc[0]["is_anomaly"])
+    def _station(name, icon, value, unit, bg_col, border_col, badge_html=""):
+        return (
+            f'<div style="flex:1;min-width:110px;background:{bg_col};'
+            f'border:1px solid {border_col};border-radius:12px;'
+            f'padding:14px 10px;text-align:center;">'
+            f'<div style="font-size:1.45rem;">{icon}</div>'
+            f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.3);'
+            f'text-transform:uppercase;letter-spacing:0.1em;margin:4px 0 2px 0;">{name}</div>'
+            f'<div style="font-size:1.05rem;font-weight:700;color:{border_col};'
+            f'font-family:JetBrains Mono,monospace;">{value}'
+            f'<span style="font-size:0.6rem;color:rgba(255,255,255,0.28);'
+            f'margin-left:2px;">{unit}</span></div>'
+            f'{badge_html}</div>'
+        )
 
-        def _station_box(icon, name, rows, st_status="ok"):
-            _sc = {
-                "ok":   (_CYAN,   "rgba(0,212,255,0.10)",  "rgba(0,212,255,0.35)"),
-                "warn": (_YELLOW, "rgba(255,214,0,0.09)",  "rgba(255,214,0,0.30)"),
-                "crit": (_RED,    "rgba(255,75,75,0.09)",  "rgba(255,75,75,0.30)"),
-            }[st_status]
-            _dot = {"ok": _GREEN, "warn": _YELLOW, "crit": _RED}[st_status]
-            _metrics = "".join([
-                f'<div style="margin-top:6px;">'
-                f'<div style="font-size:0.88rem;font-weight:700;color:{_sc[0]};">{v}'
-                f'<span style="font-size:0.6rem;color:rgba(255,255,255,0.3);margin-left:2px;">{u}</span></div>'
-                f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.3);text-transform:uppercase;">{l}</div>'
-                f'</div>'
-                for l, v, u in rows
-            ])
-            return (
-                f'<div style="flex:1;background:{_sc[1]};border:1.5px solid {_sc[2]};'
-                f'border-radius:10px;padding:13px 8px;text-align:center;min-width:0;">'
-                f'<div style="font-size:1.6rem;">{icon}</div>'
-                f'<div style="font-size:0.63rem;font-weight:700;color:{_sc[0]};'
-                f'text-transform:uppercase;letter-spacing:0.07em;margin:4px 0 3px;">{name}</div>'
-                f'<div style="width:9px;height:9px;border-radius:50%;background:{_dot};'
-                f'display:inline-block;box-shadow:0 0 7px {_dot};margin-bottom:6px;"></div>'
-                f'{_metrics}</div>'
-            )
+    _arr = '<div style="display:flex;align-items:center;color:rgba(255,255,255,0.18);font-size:1.2rem;padding:0 4px;">&#8594;</div>'
 
-        _arr = '<div style="display:flex;align-items:center;padding:0 5px;font-size:1.5rem;color:rgba(0,212,255,0.38);flex-shrink:0;">→</div>'
-
-        _qval = float(_dt_latest.get("quality", 0.8))
-        _qs = "crit" if _qval < 0.7 else ("warn" if _qval < 0.8 else "ok")
-        _ds = "crit" if _lat_anom else "ok"
-
-        st.markdown(
-            '<div style="display:flex;align-items:stretch;gap:0;padding:4px 0;">'
-            + _station_box("🏗️", "Raw Intake", [
-                ("Temperature", f"{_dt_latest['temperature']:.1f}", "°C"),
-                ("Humidity",    f"{_dt_latest['humidity']:.1f}",    "%"),
-            ], "ok")
-            + _arr
-            + _station_box("⚙️", "Extrusion", [
-                ("Pressure", f"{_dt_latest['pressure']:.2f}",  "bar"),
-                ("Speed",    f"{_dt_latest['speed']:.0f}",     "rpm"),
-            ], "ok")
-            + _arr
-            + _station_box("🧱", "Material Prep", [
-                ("Feed Rate", f"{_dt_latest['feed_rate']:.2f}",         "kg/h"),
-                ("Density",   f"{_dt_latest['material_density']:.3f}",  "g/cm³"),
-            ], "ok")
-            + _arr
-            + _station_box("🔥", "Thermal Cure", [
-                ("Hardness", f"{_dt_latest['material_hardness']:.1f}", "HV"),
-                ("Grade",    f"{int(_dt_latest['material_grade'])}",   ""),
-            ], "ok")
-            + _arr
-            + _station_box("🔬", "QC Scanner", [
-                ("Quality", f"{_qval:.4f}",                        ""),
-                ("Result",  "PASS" if _qval >= 0.7 else "FAIL",   ""),
-            ], _qs)
-            + _arr
-            + _station_box("📦", "Dispatch", [
-                ("Yield",   f"{_dt_latest['yield']:.4f}",                    ""),
-                ("Energy",  f"{_dt_latest['energy_consumption']:.0f}",        "kWh"),
-                ("Zone",    f"{ZONE_EMOJI[_dt_latest['zone']]} {_dt_latest['zone']}", ""),
-            ], _ds)
-            + '</div>',
-            unsafe_allow_html=True,
+    if _latest is not None:
+        _lat_anom_row = df_dt_health[df_dt_health["batch_id"] == _latest["batch_id"]]
+        _lat_is_anom  = bool(int(_lat_anom_row.iloc[0]["is_anomaly"])) if len(_lat_anom_row) > 0 else False
+        _qc_badge = (
+            '<div style="font-size:0.58rem;margin-top:4px;padding:2px 8px;'
+            'border-radius:10px;background:rgba(255,75,75,0.18);color:#ff4b4b;">&#9888; ANOMALY</div>'
+            if _lat_is_anom else
+            '<div style="font-size:0.58rem;margin-top:4px;padding:2px 8px;'
+            'border-radius:10px;background:rgba(0,255,136,0.12);color:#00ff88;">&#10003; NORMAL</div>'
         )
         st.markdown(
-            f'<div style="font-size:0.71rem;color:rgba(255,255,255,0.26);margin-top:7px;">'
-            f'Mirroring latest batch: <span style="color:{_CYAN};">{_lat_id}</span>'
-            f' &nbsp;·&nbsp; CI: {_dt_latest["carbon_intensity"]:.1f} gCO₂/kWh'
-            f' &nbsp;·&nbsp; {ZONE_EMOJI[_dt_latest["zone"]]} {_dt_latest["zone"]} zone'
-            f' &nbsp;·&nbsp; Anomaly: {"⚠️ YES" if _lat_anom else "✅ CLEAR"}'
-            f'</div>',
+            '<div style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:10px;">'
+            + _station("Raw Input",  "&#128230;", int(_latest["material_grade"]),
+                       "grade", "rgba(168,85,247,0.08)", _PURPLE)
+            + _arr
+            + _station("Heating",    "&#128293;", f"{_latest['temperature']:.0f}",
+                       "degC",  "rgba(249,115,22,0.08)", _ORANGE)
+            + _arr
+            + _station("Pressure",   "&#9881;",   f"{_latest['pressure']:.1f}",
+                       "bar",   "rgba(0,212,255,0.08)", _CYAN)
+            + _arr
+            + _station("Production", "&#127959;", f"{_latest['speed']:.0f}",
+                       "rpm",   "rgba(0,255,136,0.08)", _GREEN)
+            + _arr
+            + _station("QC Check",   "&#127919;", f"{_latest['quality']:.4f}",
+                       "",      "rgba(255,214,0,0.08)", _YELLOW, _qc_badge)
+            + _arr
+            + _station("Dispatch",   "&#128666;", f"{_latest['energy_consumption']:.0f}",
+                       "kWh",   "rgba(255,75,75,0.08)",  _RED)
+            + "</div>",
             unsafe_allow_html=True,
         )
     else:
-        st.info("No batch data to display.")
+        st.info("No current batch to display.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ══ CARBON-ZONE INTELLIGENCE ═══════════════════════════════════════════════
-    st.markdown('<div class="slabel">Carbon-Aware Zone Intelligence — How the Factory Adapts</div>',
-                unsafe_allow_html=True)
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 4 &#10143; ANOMALY HEARTBEAT
+    # ══════════════════════════════════════════════════════════════════════
+    st.markdown(
+        '<div class="slabel">&#128168; Anomaly Heartbeat &#8212; LSTM Reconstruction Error vs Threshold</div>',
+        unsafe_allow_html=True,
+    )
 
-    _zrecs = {}
-    for _zn, _zci in [("LOW", 100.0), ("MEDIUM", 250.0), ("HIGH", 500.0)]:
-        try:
-            _zrecs[_zn] = get_recommendation(float(_zci)).get("recommended_schedule", {})
-        except Exception:
-            _zrecs[_zn] = {}
+    if len(df_dt_health) > 0:
+        _hs = df_dt_health.copy().reset_index(drop=True)
+        _hs["idx"] = range(1, len(_hs) + 1)
+        _thresh = 0.199084
+        _nrm = _hs[_hs["is_anomaly"] == 0]
+        _anm = _hs[_hs["is_anomaly"] == 1]
 
-    _zc1, _zc2, _zc3 = st.columns(3)
-    for _zcol, _zn, _zci in zip([_zc1, _zc2, _zc3],
-                                  ["LOW",  "MEDIUM", "HIGH"],
-                                  [100,    250,      500]):
-        _zr = _zrecs[_zn]
-        _is_cur = (zone == _zn)
-        _glow = f"box-shadow:0 0 20px {ZONE_COLORS[_zn]}33;" if _is_cur else ""
-        with _zcol:
+        # Current batch risk score
+        _cur_recon = float(df_dt_health.iloc[-1]["recon_error"]) if len(df_dt_health) > 0 else 0.0
+        if _cur_recon != _cur_recon:  # NaN check
+            _cur_recon = 0.0
+        _risk_pct  = min(100, int(_cur_recon / _thresh * 100))
+        _risk_col  = _RED if _cur_recon > _thresh else (_YELLOW if _cur_recon > _thresh * 0.7 else _GREEN)
+        _risk_lbl  = "HIGH RISK" if _cur_recon > _thresh else ("ELEVATED" if _cur_recon > _thresh * 0.7 else "NORMAL")
+
+        # Verdict strip
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:16px;'
+            f'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);'
+            f'border-radius:10px;padding:12px 18px;margin-bottom:12px;">'
+            f'<div style="flex:1;">'
+            f'<div style="font-size:0.62rem;color:rgba(255,255,255,0.3);'
+            f'text-transform:uppercase;letter-spacing:0.12em;">ML Verdict &#8212; Latest Batch</div>'
+            f'<div style="font-size:1.1rem;font-weight:700;color:{_risk_col};">'
+            f'{_risk_lbl}</div></div>'
+            f'<div style="text-align:right;">'
+            f'<div style="font-size:0.62rem;color:rgba(255,255,255,0.3);">Recon Error</div>'
+            f'<div style="font-size:1.3rem;font-weight:700;color:{_risk_col};'
+            f'font-family:JetBrains Mono,monospace;">{_cur_recon:.5f}</div>'
+            f'<div style="font-size:0.65rem;color:rgba(255,255,255,0.3);">'
+            f'threshold = {_thresh}</div></div>'
+            f'<div style="width:90px;">'
+            f'<div style="height:8px;background:rgba(255,255,255,0.1);border-radius:4px;">'
+            f'<div style="height:8px;width:{_risk_pct}%;background:{_risk_col};'
+            f'border-radius:4px;transition:width 0.5s;"></div></div>'
+            f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.28);'
+            f'margin-top:3px;text-align:center;">{_risk_pct}% of threshold</div>'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+
+        _fhb = go.Figure()
+        _fhb.add_trace(go.Scatter(
+            x=_nrm["idx"].tolist(), y=_nrm["recon_error"].tolist(),
+            mode="markers", name="Normal",
+            marker=dict(color=_CYAN, size=2.5, opacity=0.5),
+            hovertemplate="Batch #%{x}<br>Error: %{y:.5f}<extra></extra>",
+        ))
+        if len(_anm) > 0:
+            _fhb.add_trace(go.Scatter(
+                x=_anm["idx"].tolist(), y=_anm["recon_error"].tolist(),
+                mode="markers", name="Anomaly",
+                marker=dict(color=_RED, size=7, symbol="x",
+                            line=dict(color=_RED, width=1.5)),
+                hovertemplate="&#9888; Batch #%{x}<br>Error: %{y:.5f}<extra></extra>",
+            ))
+        _fhb.add_hline(y=_thresh, line=dict(color=_YELLOW, dash="dash", width=1.5),
+                       annotation_text=f"Threshold {_thresh}",
+                       annotation_font=dict(color=_YELLOW, size=9),
+                       annotation_position="top right")
+        _fhb.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.012)",
+            font=dict(color="rgba(255,255,255,0.6)", family="Inter"),
+            xaxis=dict(title=dict(text="Batch Number", font=dict(size=9)),
+                       gridcolor="rgba(255,255,255,0.05)", tickfont=dict(size=8)),
+            yaxis=dict(title=dict(text="Reconstruction Error", font=dict(size=9)),
+                       gridcolor="rgba(255,255,255,0.07)", tickfont=dict(size=8)),
+            legend=dict(bgcolor="rgba(0,0,0,0.28)", bordercolor="rgba(255,255,255,0.1)",
+                        borderwidth=1, orientation="h", yanchor="bottom", y=1.01, x=0),
+            height=300, margin=dict(l=55, r=12, t=38, b=42),
+        )
+        st.plotly_chart(_fhb, use_container_width=True, config={"displayModeBar": False})
+
+        _ah1, _ah2, _ah3, _ah4 = st.columns(4)
+        with _ah1: st.metric("Batches Analysed", f"{len(_hs):,}")
+        with _ah2: st.metric("Anomalies", f"{_dt_anomaly_count:,}", delta_color="inverse")
+        with _ah3: st.metric("Anomaly Rate", f"{_anom_rate:.1f}%", delta_color="inverse")
+        with _ah4: st.metric("Avg Recon Error", f"{float(_hs['recon_error'].mean()):.5f}")
+    else:
+        st.info("No anomaly data &#8212; run Phase 2 (Energy DNA Model).")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 5 &#10143; CARBON OPPORTUNITY WINDOW
+    # ══════════════════════════════════════════════════════════════════════
+    st.markdown(
+        '<div class="slabel">&#127757; Carbon Opportunity Window &#8212; When to Run Expensive Batches Today</div>',
+        unsafe_allow_html=True,
+    )
+
+    _hours  = list(range(24))
+    _h_cols = []
+    _h_adv  = []
+    for _v in CARBON_24H:
+        if _v < CARBON_LOW_THRESHOLD:
+            _h_cols.append(_GREEN);  _h_adv.append("RUN NOW")
+        elif _v < CARBON_HIGH_THRESHOLD:
+            _h_cols.append(_YELLOW); _h_adv.append("OK")
+        else:
+            _h_cols.append(_RED);    _h_adv.append("AVOID")
+
+    _now_h  = datetime.now().hour
+    _best_h = [h for h, a in enumerate(_h_adv) if a == "RUN NOW"]
+    _avoid_h = [h for h, a in enumerate(_h_adv) if a == "AVOID"]
+    _best_str  = (f"{_best_h[0]:02d}:00&#8211;{_best_h[-1]+1:02d}:00"
+                  if _best_h else "None today")
+    _avoid_str = (f"{_avoid_h[0]:02d}:00&#8211;{_avoid_h[-1]+1:02d}:00"
+                  if _avoid_h else "None")
+    _now_adv   = _h_adv[_now_h]
+    _now_col   = _h_cols[_now_h]
+
+    # AI verdict strip
+    st.markdown(
+        f'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">'
+        f'<div style="background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.25);'
+        f'border-radius:10px;padding:10px 18px;flex:1;min-width:140px;">'
+        f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.3);text-transform:uppercase;'
+        f'letter-spacing:0.12em;">Right Now ({_now_h:02d}:00)</div>'
+        f'<div style="font-size:1.1rem;font-weight:700;color:{_now_col};">{_now_adv}</div></div>'
+        f'<div style="background:rgba(0,255,136,0.07);border:1px solid rgba(0,255,136,0.22);'
+        f'border-radius:10px;padding:10px 18px;flex:1;min-width:140px;">'
+        f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.3);text-transform:uppercase;'
+        f'letter-spacing:0.12em;">Optimal Window</div>'
+        f'<div style="font-size:1.0rem;font-weight:700;color:{_GREEN};">{_best_str}</div></div>'
+        f'<div style="background:rgba(255,75,75,0.07);border:1px solid rgba(255,75,75,0.22);'
+        f'border-radius:10px;padding:10px 18px;flex:1;min-width:140px;">'
+        f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.3);text-transform:uppercase;'
+        f'letter-spacing:0.12em;">Avoid Window</div>'
+        f'<div style="font-size:1.0rem;font-weight:700;color:{_RED};">{_avoid_str}</div></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    _fcw = go.Figure()
+    _fcw.add_trace(go.Bar(
+        x=_hours, y=CARBON_24H,
+        marker=dict(color=_h_cols, opacity=0.85, line=dict(width=0)),
+        text=_h_adv,
+        textposition="outside",
+        textfont=dict(size=7, color="rgba(255,255,255,0.4)"),
+        hovertemplate="Hour %{x}:00<br>%{y} gCO&#8322;/kWh<br>Advice: %{text}<extra></extra>",
+    ))
+    _fcw.add_hline(y=CARBON_LOW_THRESHOLD,
+                   line=dict(color=_GREEN, dash="dash", width=1.2),
+                   annotation_text=f"LOW &lt;{CARBON_LOW_THRESHOLD}",
+                   annotation_font=dict(color=_GREEN, size=9))
+    _fcw.add_hline(y=CARBON_HIGH_THRESHOLD,
+                   line=dict(color=_RED, dash="dash", width=1.2),
+                   annotation_text=f"HIGH &gt;{CARBON_HIGH_THRESHOLD}",
+                   annotation_font=dict(color=_RED, size=9))
+    _fcw.add_vline(x=_now_h, line=dict(color=_CYAN, dash="dot", width=2),
+                   annotation_text="NOW",
+                   annotation_font=dict(color=_CYAN, size=10))
+    _fcw.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.015)",
+        font=dict(color="rgba(255,255,255,0.6)", family="Inter"),
+        xaxis=dict(title=dict(text="Hour of Day", font=dict(size=9)),
+                   tickvals=list(range(0, 24, 3)),
+                   ticktext=[f"{h:02d}:00" for h in range(0, 24, 3)],
+                   tickfont=dict(size=9), gridcolor="rgba(255,255,255,0.04)"),
+        yaxis=dict(title=dict(text="gCO&#8322;/kWh", font=dict(size=9)),
+                   tickfont=dict(size=8), gridcolor="rgba(255,255,255,0.07)"),
+        height=280, margin=dict(l=55, r=12, t=20, b=42), showlegend=False,
+    )
+    st.plotly_chart(_fcw, use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 6 &#10143; BATCH REPLAY (TIME MACHINE)
+    # ══════════════════════════════════════════════════════════════════════
+    st.markdown(
+        '<div class="slabel">&#9654; Batch Replay (Time Machine) &#8212; Step Through 2,000-Batch History</div>',
+        unsafe_allow_html=True,
+    )
+
+    if _nb > 0:
+        # Ensure session state key exists
+        if "dt_replay_pos" not in st.session_state:
+            st.session_state["dt_replay_pos"] = _nb  # start at latest
+
+        # Nav buttons
+        _nb0, _nb1, _nb2, _nb3, _nb4 = st.columns([3, 1, 1, 1, 1])
+        with _nb0:
             st.markdown(
-                f'<div style="background:{ZONE_BG[_zn]};border:1px solid {ZONE_BORDER[_zn]};'
-                f'border-radius:12px;padding:16px 14px;{_glow}">'
-                f'<div style="text-align:center;margin-bottom:12px;">'
-                f'<div style="font-size:1.6rem;">{ZONE_EMOJI[_zn]}</div>'
-                f'<div style="font-size:1.05rem;font-weight:700;color:{ZONE_COLORS[_zn]};">{_zn} CARBON</div>'
-                f'<div style="font-size:0.75rem;color:rgba(255,255,255,0.38);">{_zci} gCO₂/kWh</div>'
-                + (f'<div style="font-size:0.62rem;color:{ZONE_COLORS[_zn]};border:1px solid {ZONE_COLORS[_zn]};'
-                   f'border-radius:4px;padding:2px 8px;display:inline-block;margin-top:5px;">▶ ACTIVE NOW</div>'
-                   if _is_cur else '')
-                + '</div>'
-                + ''.join([
-                    f'<div style="display:flex;justify-content:space-between;padding:4px 0;'
-                    f'border-bottom:1px solid rgba(255,255,255,0.05);">'
-                    f'<span style="font-size:0.74rem;color:rgba(255,255,255,0.38);">{lbl}</span>'
-                    f'<span style="font-size:0.77rem;font-weight:600;color:{ZONE_COLORS[_zn]};'
-                    f'font-family:\'JetBrains Mono\',monospace;">{val}</span></div>'
-                    for lbl, val in [
-                        ("Pred Yield",   f"{_zr.get('pred_yield',  0):.4f}"),
-                        ("Pred Quality", f"{_zr.get('pred_quality',0):.4f}"),
-                        ("Pred Energy",  f"{_zr.get('pred_energy', 0):.0f} kWh"),
-                        ("Pred Carbon",  f"{_zr.get('pred_carbon', 0):.1f} kg"),
-                        ("Temperature",  f"{_zr.get('temperature', 0):.1f} °C"),
-                        ("Speed",        f"{_zr.get('speed',       0):.0f} rpm"),
-                        ("Pressure",     f"{_zr.get('pressure',    0):.2f} bar"),
-                        ("Feed Rate",    f"{_zr.get('feed_rate',   0):.2f} kg/h"),
+                '<div style="font-size:0.74rem;color:rgba(255,255,255,0.35);padding-top:9px;">'
+                'Rewind to any batch &#8212; factory state fully reconstructed from DB history.</div>',
+                unsafe_allow_html=True,
+            )
+        with _nb1:
+            if st.button("&#9198; First", key="dt_rb_first", use_container_width=True):
+                st.session_state["dt_replay_pos"] = 1
+        with _nb2:
+            if st.button("&#9664; Prev", key="dt_rb_prev", use_container_width=True):
+                st.session_state["dt_replay_pos"] = max(1, st.session_state["dt_replay_pos"] - 1)
+        with _nb3:
+            if st.button("Next &#9654;", key="dt_rb_next", use_container_width=True):
+                st.session_state["dt_replay_pos"] = min(_nb, st.session_state["dt_replay_pos"] + 1)
+        with _nb4:
+            if st.button("Last &#9197;", key="dt_rb_last", use_container_width=True):
+                st.session_state["dt_replay_pos"] = _nb
+
+        _rpos = st.slider(
+            f"Batch Position (1 &#8594; {_nb:,})",
+            min_value=1, max_value=_nb,
+            key="dt_replay_pos",
+        )
+        _ridx = _rpos - 1
+        _rrow = df_batches.iloc[_ridx]
+        _rzone = classify_carbon_zone(float(_rrow["carbon_intensity"]))
+
+        # Anomaly lookup
+        _ranom_r = df_dt_health[df_dt_health["batch_id"] == _rrow["batch_id"]]
+        _r_is_anom = bool(int(_ranom_r.iloc[0]["is_anomaly"])) if len(_ranom_r) > 0 else False
+        _r_recon   = float(_ranom_r.iloc[0]["recon_error"])    if len(_ranom_r) > 0 else 0.0
+        _r_anom_col = _RED if _r_is_anom else _GREEN
+        _r_anom_lbl = "&#9888; ANOMALY DETECTED" if _r_is_anom else "&#10003; NORMAL"
+
+        # Prediction lookup
+        _rpred_r = df_preds[df_preds["batch_id"] == _rrow["batch_id"]] if len(df_preds) > 0 else pd.DataFrame()
+
+        _rl, _rr = st.columns([3, 7])
+
+        with _rl:
+            st.markdown(
+                f'<div style="background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.2);'
+                f'border-radius:13px;padding:18px 16px;">'
+                f'<div style="font-size:0.58rem;text-transform:uppercase;letter-spacing:0.14em;'
+                f'color:rgba(255,255,255,0.25);margin-bottom:4px;">BATCH {_rpos} OF {_nb:,}</div>'
+                f'<div style="font-size:1.0rem;font-weight:700;color:{_CYAN};'
+                f'font-family:JetBrains Mono,monospace;margin-bottom:10px;">{_rrow["batch_id"]}</div>'
+                + "".join([
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                    f'padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);">'
+                    f'<span style="font-size:0.7rem;color:rgba(255,255,255,0.35);">{lbl}</span>'
+                    f'<span style="font-size:0.76rem;font-weight:600;color:{vc};'
+                    f'font-family:JetBrains Mono,monospace;">{val}</span></div>'
+                    for lbl, val, vc in [
+                        ("Temp",      f"{_rrow['temperature']:.1f} degC",         _ORANGE),
+                        ("Pressure",  f"{_rrow['pressure']:.2f} bar",             _CYAN),
+                        ("Speed",     f"{_rrow['speed']:.0f} rpm",               _GREEN),
+                        ("Feed Rate", f"{_rrow['feed_rate']:.2f} kg/h",          _CYAN),
+                        ("Humidity",  f"{_rrow['humidity']:.1f}%",               "rgba(255,255,255,0.5)"),
+                        ("Density",   f"{_rrow['material_density']:.3f} g/cm3",  _PURPLE),
+                        ("Hardness",  f"{_rrow['material_hardness']:.1f} HV",    _PURPLE),
+                        ("Grade",     f"{int(_rrow['material_grade'])}",          _PURPLE),
                     ]
                 ])
-                + '</div>',
+                + f'<div style="margin-top:10px;padding:8px 10px;border-radius:8px;'
+                f'background:rgba(255,255,255,0.04);'
+                f'display:flex;justify-content:space-between;align-items:center;">'
+                f'<span style="font-size:0.7rem;color:rgba(255,255,255,0.35);">Zone</span>'
+                f'<span style="font-weight:600;color:{ZONE_COLORS[_rzone]};">{_rzone}</span></div>'
+                f'<div style="margin-top:6px;padding:8px 10px;border-radius:8px;'
+                f'background:rgba(255,255,255,0.04);'
+                f'display:flex;justify-content:space-between;align-items:center;">'
+                f'<span style="font-size:0.7rem;color:rgba(255,255,255,0.35);">ML Verdict</span>'
+                f'<span style="font-size:0.8rem;font-weight:600;color:{_r_anom_col};">'
+                f'{_r_anom_lbl}</span></div>'
+                f'<div style="font-size:0.62rem;color:rgba(255,255,255,0.22);'
+                f'margin-top:8px;">Recon Error: {_r_recon:.5f}</div>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        with _rr:
+            # Replay pipeline
+            _r_qc_badge = (
+                '<div style="font-size:0.58rem;margin-top:4px;padding:2px 8px;border-radius:10px;'
+                'background:rgba(255,75,75,0.18);color:#ff4b4b;">&#9888; ANOMALY</div>'
+                if _r_is_anom else
+                '<div style="font-size:0.58rem;margin-top:4px;padding:2px 8px;border-radius:10px;'
+                'background:rgba(0,255,136,0.12);color:#00ff88;">&#10003; NORMAL</div>'
+            )
+            st.markdown(
+                '<div style="font-size:0.68rem;color:rgba(255,255,255,0.3);'
+                'letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;">'
+                'Pipeline Replay</div>'
+                '<div style="display:flex;gap:5px;flex-wrap:nowrap;overflow-x:auto;">'
+                + _station("Raw Input",  "&#128230;", int(_rrow["material_grade"]),
+                           "grade", "rgba(168,85,247,0.08)", _PURPLE)
+                + _arr
+                + _station("Heating",    "&#128293;", f"{_rrow['temperature']:.0f}",
+                           "degC",  "rgba(249,115,22,0.08)", _ORANGE)
+                + _arr
+                + _station("Pressure",   "&#9881;",   f"{_rrow['pressure']:.1f}",
+                           "bar",   "rgba(0,212,255,0.08)", _CYAN)
+                + _arr
+                + _station("Production", "&#127959;", f"{_rrow['speed']:.0f}",
+                           "rpm",   "rgba(0,255,136,0.08)", _GREEN)
+                + _arr
+                + _station("QC Check",   "&#127919;", f"{_rrow['quality']:.4f}",
+                           "",      "rgba(255,214,0,0.08)", _YELLOW, _r_qc_badge)
+                + _arr
+                + _station("Dispatch",   "&#128666;", f"{_rrow['energy_consumption']:.0f}",
+                           "kWh",   ZONE_BG[_rzone], ZONE_COLORS[_rzone])
+                + "</div>",
+                unsafe_allow_html=True,
+            )
 
-    # ══ BATCH FLOW SIMULATOR ═══════════════════════════════════════════════════
-    st.markdown('<div class="slabel">Batch Flow Simulator — Step-Through All 6 Production Stations</div>',
-                unsafe_allow_html=True)
-
-    _sim_all_ids = df_batches["batch_id"].tolist()
-    _bsim_c1, _bsim_c2 = st.columns([3, 7])
-    with _bsim_c1:
-        _bsim_id = st.selectbox("Batch to simulate", _sim_all_ids[:200], index=0,
-                                key="dt_sim_bid", label_visibility="collapsed")
-    with _bsim_c2:
-        _run_bsim = st.button("▶  Simulate This Batch Through Factory", key="dt_run_bsim")
-
-    _bsim_ph = st.empty()
-
-    _SIM_STATIONS_DEF = [
-        ("🏗️", "RAW INTAKE",    [("temperature","°C"),       ("humidity","%")]),
-        ("⚙️", "EXTRUSION",     [("pressure","bar"),          ("speed","rpm")]),
-        ("🧱", "MATERIAL PREP", [("feed_rate","kg/h"),        ("material_density","g/cm³")]),
-        ("🔥", "THERMAL CURE",  [("material_hardness","HV"),  ("material_grade","")]),
-        ("🔬", "QC SCANNER",    [("quality",""),              ("yield","")]),
-        ("📦", "DISPATCH",      [("energy_consumption","kWh"),("carbon_intensity","gCO₂/kWh")]),
-    ]
-
-    def _bsim_row_html(brow, active):
-        _h = '<div style="display:flex;gap:5px;align-items:stretch;">'
-        for _si, (_ic, _sn, _flds) in enumerate(_SIM_STATIONS_DEF):
-            if _si < active:
-                _bg, _bc, _tc, _lbl = "rgba(0,255,136,0.07)", "rgba(0,255,136,0.35)", _GREEN, "✓ DONE"
-            elif _si == active:
-                _bg, _bc, _tc, _lbl = "rgba(0,212,255,0.13)", _CYAN, _CYAN, "▶ ACTIVE"
-            else:
-                _bg, _bc, _tc, _lbl = "rgba(255,255,255,0.02)", "rgba(255,255,255,0.1)", "rgba(255,255,255,0.25)", "PENDING"
-            _mh = ""
-            if _si <= active:
-                for _fk, _fu in _flds:
-                    _fv = brow.get(_fk, 0) if hasattr(brow, "get") else getattr(brow, _fk, 0)
-                    try:
-                        _fvs = f"{float(_fv):.4g}"
-                    except Exception:
-                        _fvs = str(_fv)
-                    _mh += (f'<div style="font-size:0.82rem;font-weight:700;color:{_tc};">{_fvs}'
-                            f'<span style="font-size:0.58rem;color:rgba(255,255,255,0.3);margin-left:2px;">{_fu}</span></div>')
-            _h += (f'<div style="flex:1;background:{_bg};border:1.5px solid {_bc};border-radius:9px;'
-                   f'padding:11px 6px;text-align:center;min-width:0;">'
-                   f'<div style="font-size:1.3rem;">{_ic}</div>'
-                   f'<div style="font-size:0.6rem;font-weight:700;color:{_tc};text-transform:uppercase;'
-                   f'letter-spacing:0.06em;margin:3px 0;">{_sn}</div>'
-                   f'<div style="font-size:0.58rem;color:{_tc};margin-bottom:5px;">{_lbl}</div>'
-                   f'{_mh}</div>')
-            if _si < len(_SIM_STATIONS_DEF) - 1:
-                _h += '<div style="display:flex;align-items:center;font-size:1.1rem;color:rgba(0,212,255,0.35);flex-shrink:0;padding:0 2px;">→</div>'
-        return _h + '</div>'
-
-    if _run_bsim:
-        _sbdf = df_batches[df_batches["batch_id"] == _bsim_id]
-        if len(_sbdf) > 0:
-            _sbr = _sbdf.iloc[0]
-            for _step in range(len(_SIM_STATIONS_DEF) + 1):
-                _active = min(_step, len(_SIM_STATIONS_DEF) - 1)
-                _energy_pct = _step / len(_SIM_STATIONS_DEF)
-                _estep = float(_sbr["energy_consumption"]) * _energy_pct
-                _result_html = ""
-                if _step == len(_SIM_STATIONS_DEF):
-                    _rz = _sbr["zone"]
-                    _result_html = (
-                        f'<div style="background:rgba(0,255,136,0.07);border:1px solid rgba(0,255,136,0.3);'
-                        f'border-radius:10px;padding:14px 20px;margin-top:12px;'
-                        f'display:flex;gap:28px;flex-wrap:wrap;align-items:center;">'
-                        f'<div><div style="font-size:0.62rem;color:rgba(255,255,255,0.35);text-transform:uppercase;">Final Yield</div>'
-                        f'<div style="font-size:1.3rem;font-weight:700;color:{_GREEN};">{float(_sbr["yield"]):.4f}</div></div>'
-                        f'<div><div style="font-size:0.62rem;color:rgba(255,255,255,0.35);text-transform:uppercase;">Quality</div>'
-                        f'<div style="font-size:1.3rem;font-weight:700;color:{_CYAN};">{float(_sbr["quality"]):.4f}</div></div>'
-                        f'<div><div style="font-size:0.62rem;color:rgba(255,255,255,0.35);text-transform:uppercase;">Energy Used</div>'
-                        f'<div style="font-size:1.3rem;font-weight:700;color:{_YELLOW};">{float(_sbr["energy_consumption"]):.0f} kWh</div></div>'
-                        f'<div><div style="font-size:0.62rem;color:rgba(255,255,255,0.35);text-transform:uppercase;">Carbon Int.</div>'
-                        f'<div style="font-size:1.3rem;font-weight:700;color:{_RED};">{float(_sbr["carbon_intensity"]):.1f}</div></div>'
-                        f'<div><div style="font-size:0.62rem;color:rgba(255,255,255,0.35);text-transform:uppercase;">Zone</div>'
-                        f'<div style="font-size:1.3rem;font-weight:700;color:{ZONE_COLORS[_rz]};">'
-                        f'{ZONE_EMOJI[_rz]} {_rz}</div></div>'
-                        f'</div>'
+            # Outcome cards
+            st.markdown("<div style='margin-top:14px;'>", unsafe_allow_html=True)
+            _oc1, _oc2, _oc3, _oc4 = st.columns(4)
+            for _oc, (_lbl, _vstr, _vc) in zip(
+                [_oc1, _oc2, _oc3, _oc4],
+                [
+                    ("Actual Yield",   f"{_rrow['yield']:.4f}",                  _GREEN),
+                    ("Actual Quality", f"{_rrow['quality']:.4f}",                _CYAN),
+                    ("Energy Used",    f"{_rrow['energy_consumption']:.0f} kWh", _YELLOW),
+                    ("Carbon CI",      f"{_rrow['carbon_intensity']:.1f}",       _RED),
+                ],
+            ):
+                with _oc:
+                    st.markdown(
+                        f'<div style="background:rgba(255,255,255,0.04);'
+                        f'border:1px solid rgba(255,255,255,0.08);'
+                        f'border-radius:9px;padding:10px 8px;text-align:center;">'
+                        f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.32);'
+                        f'text-transform:uppercase;letter-spacing:0.08em;">{_lbl}</div>'
+                        f'<div style="font-size:1.05rem;font-weight:700;color:{_vc};'
+                        f'font-family:JetBrains Mono,monospace;margin-top:3px;">{_vstr}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
                     )
-                _bsim_ph.markdown(
-                    f'<div style="background:rgba(0,0,0,0.3);border:1px solid rgba(0,212,255,0.15);'
-                    f'border-radius:12px;padding:16px;">'
-                    f'<div style="font-size:0.68rem;color:rgba(255,255,255,0.3);margin-bottom:8px;">'
-                    f'Batch: <span style="color:{_CYAN};">{_bsim_id}</span>'
-                    f' &nbsp;·&nbsp; Step {min(_step+1,len(_SIM_STATIONS_DEF))}/{len(_SIM_STATIONS_DEF)}'
-                    f' &nbsp;·&nbsp; Energy consumed so far: <span style="color:{_YELLOW};">{_estep:.0f} kWh</span>'
-                    f'</div>'
-                    + _bsim_row_html(_sbr, _active)
-                    + _result_html
-                    + '</div>',
-                    unsafe_allow_html=True,
-                )
-                time.sleep(1.1)
-        else:
-            _bsim_ph.warning(f"Batch {_bsim_id} not found.")
-    else:
-        _bsim_ph.markdown(
-            '<div style="font-size:0.8rem;color:rgba(255,255,255,0.3);padding:12px;">'
-            'Select a batch and click ▶ Simulate to watch it step through all 6 stations '
-            'with real process parameters, energy usage, and final outcome.</div>',
-            unsafe_allow_html=True,
-        )
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ══ MACHINE HEALTH MONITOR ═════════════════════════════════════════════════
-    st.markdown('<div class="slabel">Machine Health Monitor — Autoencoder Reconstruction Error</div>',
-                unsafe_allow_html=True)
-
-    _mh_l, _mh_r = st.columns([6, 4])
-
-    with _mh_l:
-        if len(df_dt_health) > 0:
-            _dh100    = df_dt_health.tail(100).reset_index(drop=True)
-            _thresh95 = float(df_dt_health["recon_error"].quantile(0.95))
-            _fh = go.Figure()
-            _fh.add_trace(go.Scatter(
-                x=_dh100.index.tolist(), y=_dh100["recon_error"].tolist(),
-                mode="lines", line=dict(color=_CYAN, width=1.8),
-                fill="tozeroy", fillcolor="rgba(0,212,255,0.06)",
-                name="Recon Error",
-                hovertemplate="Batch %{x}<br>Recon Error: %{y:.6f}<extra></extra>",
-            ))
-            _am = _dh100["is_anomaly"] == 1
-            if _am.any():
-                _fh.add_trace(go.Scatter(
-                    x=_dh100[_am].index.tolist(), y=_dh100[_am]["recon_error"].tolist(),
-                    mode="markers",
-                    marker=dict(color=_RED, size=10, symbol="x", line=dict(color=_RED, width=2)),
-                    name="⚠️ Anomaly",
-                    hovertemplate="⚠️ ANOMALY<br>Batch %{x}<br>Error: %{y:.6f}<extra></extra>",
+            # Pred vs actual mini chart (if predictions exist)
+            if len(_rpred_r) > 0:
+                _fcmp = go.Figure()
+                _cats = ["Yield", "Quality"]
+                _acts = [float(_rrow["yield"]), float(_rrow["quality"])]
+                _prds = [float(_rpred_r.iloc[0]["pred_yield"]),
+                         float(_rpred_r.iloc[0]["pred_quality"])]
+                _fcmp.add_trace(go.Bar(
+                    name="Actual", x=_cats, y=_acts,
+                    marker=dict(color=[_GREEN, _CYAN], opacity=0.85),
                 ))
-            _fh.add_hline(y=_thresh95, line=dict(color=_RED, dash="dash", width=1.5),
-                          annotation_text=f"95th pct ({_thresh95:.5f})",
-                          annotation_font=dict(color=_RED, size=9))
-            dark_layout(_fh, height=340)
-            _fh.update_layout(
-                title=dict(text="Reconstruction Error — Last 100 Batches  (× = anomaly)",
-                           font=dict(size=12, color="rgba(255,255,255,0.55)")),
-                legend=dict(bgcolor="rgba(0,0,0,0.3)", bordercolor="rgba(255,255,255,0.1)",
-                            borderwidth=1, font=dict(size=10)),
-            )
-            st.plotly_chart(_fh, use_container_width=True, config={"displayModeBar": False})
-        else:
-            st.info("No health data available.")
+                _fcmp.add_trace(go.Bar(
+                    name="Predicted", x=_cats, y=_prds,
+                    marker=dict(color=[_YELLOW, _ORANGE], opacity=0.7),
+                ))
+                _fcmp.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.015)",
+                    font=dict(color="rgba(255,255,255,0.6)", family="Inter"),
+                    title=dict(text=f"Actual vs Predicted &#8212; Batch {_rpos}",
+                               font=dict(size=10, color="rgba(255,255,255,0.45)")),
+                    barmode="group", bargap=0.3,
+                    xaxis=dict(tickfont=dict(size=10), gridcolor="rgba(255,255,255,0.04)"),
+                    yaxis=dict(tickfont=dict(size=8), gridcolor="rgba(255,255,255,0.07)"),
+                    legend=dict(bgcolor="rgba(0,0,0,0.25)",
+                                bordercolor="rgba(255,255,255,0.1)", borderwidth=1,
+                                orientation="h", yanchor="bottom", y=1.01, x=0),
+                    height=210, margin=dict(l=42, r=8, t=36, b=30),
+                )
+                st.plotly_chart(_fcmp, use_container_width=True,
+                                config={"displayModeBar": False})
 
-    with _mh_r:
-        _ta = int((df_dt_health["is_anomaly"] == 1).sum()) if len(df_dt_health) > 0 else 0
-        _te = len(df_dt_health)
-        _ar = _ta / max(_te, 1) * 100
-        _hsc = _RED if _ar > 15 else (_YELLOW if _ar > 7 else _GREEN)
-        _t95 = float(df_dt_health["recon_error"].quantile(0.95)) if _te > 0 else 0.0
-        st.markdown(
-            f'<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);'
-            f'border-radius:10px;padding:14px;margin-bottom:12px;">'
-            f'<div style="font-size:0.65rem;color:rgba(255,255,255,0.32);text-transform:uppercase;'
-            f'letter-spacing:0.1em;margin-bottom:8px;">Health Summary</div>'
-            + ''.join([
-                f'<div style="display:flex;justify-content:space-between;padding:5px 0;'
-                f'border-bottom:1px solid rgba(255,255,255,0.05);">'
-                f'<span style="font-size:0.77rem;color:rgba(255,255,255,0.4);">{lb}</span>'
-                f'<span style="font-size:0.8rem;font-weight:600;color:{co};">{vl}</span></div>'
-                for lb, vl, co in [
-                    ("Total Embeddings",  f"{_te:,}",        _CYAN),
-                    ("Anomalies Flagged", f"{_ta:,}",        _RED),
-                    ("Anomaly Rate",      f"{_ar:.2f}%",     _hsc),
-                    ("95th pct Threshold",f"{_t95:.5f}",     _YELLOW),
-                    ("Factory Status",    _dt_fstatus,       _dt_fc),
-                ]
-            ])
-            + '</div>',
-            unsafe_allow_html=True,
-        )
-        if _ta > 0:
-            _df_at = (df_dt_health[df_dt_health["is_anomaly"] == 1][["batch_id", "recon_error"]]
-                      .sort_values("recon_error", ascending=False).head(15).copy())
-            _df_at.columns = ["Batch ID", "Recon Error"]
-            _df_at["Recon Error"] = _df_at["Recon Error"].round(6)
-            st.markdown('<div style="font-size:0.65rem;color:rgba(255,255,255,0.3);'
-                        'text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">'
-                        '⚠️ Top Anomalous Batches by Error</div>', unsafe_allow_html=True)
-            st.dataframe(_df_at, use_container_width=True, hide_index=True, height=220)
-        else:
-            st.success("✅ No anomalies detected.")
+        # Context window chart
+        _wz = 40
+        _wlo = max(0, _ridx - _wz // 2)
+        _whi = min(_nb, _wlo + _wz)
+        _wdf = df_batches.iloc[_wlo:_whi].reset_index(drop=True)
+        _wpos = _ridx - _wlo
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ══ GENOME ANOMALY FINGERPRINT ═════════════════════════════════════════════
-    st.markdown('<div class="slabel">Genome Anomaly Fingerprint — 25-Dimension Manufacturing DNA</div>',
-                unsafe_allow_html=True)
-
-    if len(df_dt_genome_anom) > 0:
-        _dfng = df_dt_genome_anom[df_dt_genome_anom["is_anomaly"] == 0]
-        _dfag = df_dt_genome_anom[df_dt_genome_anom["is_anomaly"] == 1]
-        _gnorm = np.mean([json.loads(g) for g in _dfng["genome"]], axis=0) if len(_dfng) > 0 else np.zeros(25)
-        _ganom = np.mean([json.loads(g) for g in _dfag["genome"]], axis=0) if len(_dfag) > 0 else np.zeros(25)
-
-        def _gbar(vals, title, col):
-            _f = go.Figure(go.Bar(
-                x=GENOME_LABELS, y=vals.tolist(),
-                marker=dict(color=col, opacity=0.85, line=dict(width=0)),
-                hovertemplate="<b>%{x}</b><br>z-score: %{y:.4f}<extra></extra>",
-            ))
-            _f.add_hline(y=0, line=dict(color="rgba(255,255,255,0.15)", dash="dot", width=1))
-            _f.update_layout(
-                title=dict(text=title, font=dict(size=11, color="rgba(255,255,255,0.55)")),
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.02)",
-                font=dict(color="rgba(255,255,255,0.7)", family="Inter"),
-                xaxis=dict(tickangle=60, tickfont=dict(size=8), gridcolor="rgba(255,255,255,0.04)"),
-                yaxis=dict(title="z-score", gridcolor="rgba(255,255,255,0.07)",
-                           zerolinecolor="rgba(255,255,255,0.15)"),
-                height=310, margin=dict(l=50, r=10, t=44, b=72),
-                showlegend=False, bargap=0.25,
-            )
-            return _f
-
-        _gfa, _gfb = st.columns(2)
-        with _gfa:
-            st.plotly_chart(_gbar(_gnorm, f"✅ Normal Batches ({len(_dfng)}) — Mean 25D Genome", _CYAN),
-                            use_container_width=True, config={"displayModeBar": False})
-        with _gfb:
-            st.plotly_chart(_gbar(_ganom, f"⚠️ Anomalous Batches ({len(_dfag)}) — Mean 25D Genome", _RED),
-                            use_container_width=True, config={"displayModeBar": False})
-
-        _gdiff  = _ganom - _gnorm
-        _gdc    = [_RED if v > 0 else _GREEN for v in _gdiff]
-        _gfd    = go.Figure(go.Bar(
-            x=GENOME_LABELS, y=_gdiff.tolist(),
-            marker=dict(color=_gdc, opacity=0.85, line=dict(width=0)),
-            hovertemplate="<b>%{x}</b><br>Δ z-score: %{y:.4f}<extra></extra>",
+        _fwin = go.Figure()
+        _fwin.add_trace(go.Scatter(
+            x=list(range(len(_wdf))), y=_wdf["yield"].tolist(),
+            mode="lines+markers", name="Yield",
+            line=dict(color="rgba(0,212,255,0.35)", width=1.3),
+            marker=dict(size=3, color="rgba(0,212,255,0.35)"),
         ))
-        _gfd.add_hline(y=0, line=dict(color="rgba(255,255,255,0.15)", dash="dot", width=1))
-        _gfd.update_layout(
-            title=dict(
-                text="Δ Genome Delta: Anomalous − Normal  (Red = elevated in anomalies  ·  Green = suppressed)",
-                font=dict(size=11, color="rgba(255,255,255,0.55)"),
-            ),
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.02)",
-            font=dict(color="rgba(255,255,255,0.7)", family="Inter"),
-            xaxis=dict(tickangle=60, tickfont=dict(size=8), gridcolor="rgba(255,255,255,0.04)"),
-            yaxis=dict(title="Δ z-score", gridcolor="rgba(255,255,255,0.07)",
-                       zerolinecolor="rgba(255,255,255,0.15)"),
-            height=295, margin=dict(l=50, r=10, t=44, b=72), showlegend=False, bargap=0.25,
-        )
-        st.plotly_chart(_gfd, use_container_width=True, config={"displayModeBar": False})
-    else:
-        st.info("Genome anomaly data unavailable.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ══ 24h CARBON GRID SIMULATION ═════════════════════════════════════════════
-    st.markdown('<div class="slabel">24h Carbon Grid Simulation — AI-Driven Adaptive Scheduling</div>',
-                unsafe_allow_html=True)
-
-    _24h_btn   = st.button("▶  Animate 24h Carbon Forecast", key="dt_24h_anim")
-    _24h_chart = st.empty()
-    _24h_badge = st.empty()
-
-    def _mk24(hx, cy, suffix=""):
-        _zc = [ZONE_COLORS[classify_carbon_zone(float(c))] for c in cy]
-        _fg = go.Figure()
-        _fg.add_trace(go.Scatter(
-            x=hx, y=cy, mode="lines+markers",
-            line=dict(color=_CYAN, width=2),
-            marker=dict(color=_zc, size=9, line=dict(color="rgba(0,0,0,0.4)", width=1)),
-            fill="tozeroy", fillcolor="rgba(0,212,255,0.07)",
-            hovertemplate="Hour %{x}:00 — %{y} gCO₂/kWh<extra></extra>",
+        _fwin.add_trace(go.Scatter(
+            x=list(range(len(_wdf))), y=_wdf["quality"].tolist(),
+            mode="lines+markers", name="Quality",
+            line=dict(color="rgba(0,255,136,0.35)", width=1.3),
+            marker=dict(size=3, color="rgba(0,255,136,0.35)"),
         ))
-        _fg.add_hline(y=CARBON_LOW_THRESHOLD, line=dict(color=_GREEN, dash="dash", width=1),
-                      annotation_text=f"LOW ≤{CARBON_LOW_THRESHOLD}",
-                      annotation_font=dict(color=_GREEN, size=9))
-        _fg.add_hline(y=CARBON_HIGH_THRESHOLD, line=dict(color=_RED, dash="dash", width=1),
-                      annotation_text=f"HIGH >{CARBON_HIGH_THRESHOLD}",
-                      annotation_font=dict(color=_RED, size=9))
-        for _hh, _ci in enumerate(cy):
-            _zz = classify_carbon_zone(float(_ci))
-            _zfill = {"LOW":"rgba(0,255,136,0.06)","MEDIUM":"rgba(255,214,0,0.04)","HIGH":"rgba(255,75,75,0.06)"}[_zz]
-            _fg.add_vrect(x0=_hh-0.5, x1=_hh+0.5, fillcolor=_zfill, line_width=0, layer="below")
-        _fg.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.02)",
-            font=dict(color="rgba(255,255,255,0.7)", family="Inter"),
-            xaxis=dict(title="Hour of Day", gridcolor="rgba(255,255,255,0.07)",
-                       range=[-0.5, 23.5], tickvals=list(range(0, 24, 2)),
-                       ticktext=[f"{h:02d}:00" for h in range(0, 24, 2)]),
-            yaxis=dict(title="Carbon Intensity (gCO₂/kWh)", gridcolor="rgba(255,255,255,0.07)"),
-            title=dict(text=f"Simulated 24h Carbon Grid Load{suffix}",
-                       font=dict(size=12, color="rgba(255,255,255,0.55)")),
-            height=320, margin=dict(l=55, r=20, t=44, b=44), showlegend=False,
+        _fwin.add_vline(x=_wpos, line=dict(color=_YELLOW, width=2, dash="dot"),
+                        annotation_text="Selected",
+                        annotation_font=dict(color=_YELLOW, size=9))
+        _fwin.add_scatter(
+            x=[_wpos],
+            y=[float(_wdf.iloc[_wpos]["yield"]) if _wpos < len(_wdf) else 0],
+            mode="markers",
+            marker=dict(color=_YELLOW, size=11, symbol="diamond"),
+            name="Selected",
+            hovertemplate="Selected batch<br>Yield: %{y:.4f}<extra></extra>",
         )
-        return _fg
+        _fwin.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.012)",
+            font=dict(color="rgba(255,255,255,0.6)", family="Inter"),
+            title=dict(text=f"Context: batches {_wlo+1}&#8211;{_whi} (selected = {_rpos})",
+                       font=dict(size=10, color="rgba(255,255,255,0.42)")),
+            xaxis=dict(title=dict(text="Window position", font=dict(size=8)),
+                       tickfont=dict(size=7), gridcolor="rgba(255,255,255,0.05)"),
+            yaxis=dict(tickfont=dict(size=8), gridcolor="rgba(255,255,255,0.07)"),
+            legend=dict(bgcolor="rgba(0,0,0,0.35)",
+                        bordercolor="rgba(255,255,255,0.1)", borderwidth=1,
+                        orientation="h", yanchor="top", y=0.99, x=1, xanchor="right"),
+            height=200, margin=dict(l=42, r=8, t=36, b=35),
+        )
+        st.plotly_chart(_fwin, use_container_width=True, config={"displayModeBar": False})
 
-    if _24h_btn:
-        _hacc, _cacc = [], []
-        for _hr in range(24):
-            _hacc.append(_hr); _cacc.append(CARBON_24H[_hr])
-            _sz = classify_carbon_zone(float(CARBON_24H[_hr]))
-            _24h_chart.plotly_chart(_mk24(_hacc, _cacc, f" — Hour {_hr:02d}:00"),
-                                    use_container_width=True, config={"displayModeBar": False})
-            try:
-                _hrec = get_recommendation(float(CARBON_24H[_hr]))
-                _hrs  = _hrec.get("recommended_schedule", {})
-                _hry  = _hrs.get("pred_yield", 0.0)
-                _hre  = _hrs.get("pred_energy", 0.0)
-            except Exception:
-                _hry = _hre = 0.0
-            _24h_badge.markdown(
-                f'<div style="background:{ZONE_BG[_sz]};border:1px solid {ZONE_BORDER[_sz]};'
-                f'border-radius:8px;padding:8px 20px;display:inline-flex;gap:20px;align-items:center;">'
-                f'<span style="font-weight:700;font-size:1.0rem;color:{ZONE_COLORS[_sz]};">'
-                f'{ZONE_EMOJI[_sz]}  Hour {_hr:02d}:00 — {_sz}</span>'
-                f'<span style="font-size:0.8rem;color:rgba(255,255,255,0.45);">'
-                f'CI = {CARBON_24H[_hr]} gCO₂/kWh &nbsp;·&nbsp; '
-                f'Rec Yield = {_hry:.4f} &nbsp;·&nbsp; Rec Energy = {_hre:.0f} kWh</span></div>',
-                unsafe_allow_html=True,
-            )
-            time.sleep(0.8)
-        _24h_badge.markdown(
-            f'<div style="font-size:0.8rem;color:{_GREEN};margin-top:6px;">'
-            f'✅  24h simulation complete — {len(CARBON_24H)} hourly AI recommendations rendered.</div>',
-            unsafe_allow_html=True,
-        )
     else:
-        _24h_chart.plotly_chart(_mk24(list(range(24)), CARBON_24H),
-                                use_container_width=True, config={"displayModeBar": False})
-        _24h_badge.markdown(
-            '<div style="font-size:0.79rem;color:rgba(255,255,255,0.32);margin-top:2px;">'
-            '↑ Click ▶ to animate hour by hour — AI recommends an optimal schedule at each step.</div>',
-            unsafe_allow_html=True,
-        )
+        st.info("No batch data available for replay.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ══ WHAT-IF PIPELINE SIMULATOR ════════════════════════════════════════════
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 7 &#10143; WHAT-IF SIMULATION LAB
+    # ══════════════════════════════════════════════════════════════════════
     st.markdown(
-        '<div class="slabel">🔬 What-If Pipeline Simulator — In-Memory · No DB Write</div>',
+        '<div class="slabel">&#128300; What-If Simulation Lab &#8212; Run the Full ML Pipeline In-Memory</div>',
         unsafe_allow_html=True,
     )
 
-    _wi_col_l, _wi_col_r = st.columns([2, 3], gap="large")
-
-    with _wi_col_l:
+    _wl, _wr = st.columns([2, 3], gap="large")
+    with _wl:
         st.markdown(
-            '<div style="font-size:0.76rem;font-weight:600;color:rgba(255,255,255,0.45);'
-            'letter-spacing:0.1em;margin:0 0 6px 0;">PROCESS PARAMETERS</div>',
+            '<div style="font-size:0.72rem;font-weight:600;color:rgba(255,255,255,0.4);'
+            'letter-spacing:0.1em;margin-bottom:6px;">PROCESS PARAMETERS</div>',
             unsafe_allow_html=True,
         )
-        _wi_temp     = st.slider("Temperature (°C)",       100,  300, 180,        key="wi_temp")
-        _wi_pressure = st.slider("Pressure (bar)",         1.0, 10.0,  5.0, 0.1,  key="wi_pressure")
-        _wi_speed    = st.slider("Speed (rpm)",             50,  300, 150,        key="wi_speed")
-        _wi_feed     = st.slider("Feed Rate (kg/h)",        5.0, 50.0, 20.0, 0.5, key="wi_feed")
-        _wi_humidity = st.slider("Humidity (%)",            20,   80,  45,        key="wi_humidity")
+        _wi_temp     = st.slider("Temperature (degC)",      100,  300, 180,       key="wi_temp")
+        _wi_pressure = st.slider("Pressure (bar)",          1.0, 10.0,  5.0, 0.1, key="wi_pressure")
+        _wi_speed    = st.slider("Speed (rpm)",              50,  300, 150,       key="wi_speed")
+        _wi_feed     = st.slider("Feed Rate (kg/h)",         5.0, 50.0, 20.0, 0.5,key="wi_feed")
+        _wi_humidity = st.slider("Humidity (%)",             20,   80,  45,       key="wi_humidity")
         st.markdown(
-            '<div style="font-size:0.76rem;font-weight:600;color:rgba(255,255,255,0.45);'
+            '<div style="font-size:0.72rem;font-weight:600;color:rgba(255,255,255,0.4);'
             'letter-spacing:0.1em;margin:10px 0 6px 0;">MATERIAL PROPERTIES</div>',
             unsafe_allow_html=True,
         )
-        _wi_density  = st.slider("Density (g/cm³)",        0.8,  3.5,  2.0, 0.1, key="wi_density")
-        _wi_hardness = st.slider("Hardness (HRC)",          10,  100,  55,        key="wi_hardness")
-        _wi_grade    = st.slider("Grade (1-10)",             1,   10,   5,        key="wi_grade")
+        _wi_density  = st.slider("Density (g/cm3)",         0.8,  3.5,  2.0, 0.1, key="wi_density")
+        _wi_hardness = st.slider("Hardness (HRC)",           10,  100,  55,       key="wi_hardness")
+        _wi_grade    = st.slider("Grade (1-10)",              1,   10,   5,       key="wi_grade")
         st.markdown(
-            '<div style="font-size:0.76rem;font-weight:600;color:rgba(255,255,255,0.45);'
+            '<div style="font-size:0.72rem;font-weight:600;color:rgba(255,255,255,0.4);'
             'letter-spacing:0.1em;margin:10px 0 6px 0;">ENVIRONMENT</div>',
             unsafe_allow_html=True,
         )
-        _wi_carbon = st.slider("Carbon Intensity (gCO₂/kWh)", 0, 600, 220, key="wi_carbon")
+        _wi_carbon = st.slider("Carbon Intensity (gCO2/kWh)", 0, 600, 220, key="wi_carbon")
         st.markdown("<br>", unsafe_allow_html=True)
-        _wi_run = st.button(
-            "▶  Run Full Pipeline Simulation",
-            key="wi_run", use_container_width=True,
-        )
+        _wi_run = st.button("&#9654; Run Full Pipeline Simulation",
+                            key="wi_run", use_container_width=True)
 
-    with _wi_col_r:
+    with _wr:
         if _wi_run:
-            _wi_status = st.empty()
-            _wi_prog   = st.progress(0)
-            _wi_result = st.empty()
+            _wi_stat = st.empty()
+            _wi_prog = st.progress(0)
+            _wi_out  = st.empty()
             try:
-                import pickle
-                import torch
+                import pickle, torch
                 from src.energy_dna.model import LSTMAutoencoder
                 from config.settings import (
                     MODELS_DIR, ENERGY_INPUT_DIM, ENERGY_HIDDEN_DIM,
                     ENERGY_LATENT_DIM, ENERGY_NUM_LAYERS,
                 )
 
-                # ── Stage 1 : Synthetic energy signal ─────────────────────────
-                _wi_status.markdown(
-                    '<div style="font-size:0.82rem;color:#00d4ff;">'
-                    '⚙️  Stage 1 / 5 — Generating energy signal...</div>',
+                _wi_stat.markdown(
+                    '<div style="color:#00d4ff;font-size:0.82rem;">'
+                    '&#9881; Stage 1/5 &#8212; Generating energy signal...</div>',
                     unsafe_allow_html=True,
                 )
                 _wi_prog.progress(12)
-                time.sleep(0.35)
+                time.sleep(0.3)
                 _rng   = np.random.default_rng(seed=int(_wi_temp * 100 + _wi_speed))
-                _base  = 50 + (_wi_temp / 300) * 80 + (_wi_speed / 300) * 50 + (_wi_feed / 50) * 20
-                _t_ax  = np.linspace(0, 4 * np.pi, 128)
-                _sig   = _base + 10 * np.sin(_t_ax) + _rng.normal(0, 5, 128)
+                _base  = 50 + (_wi_temp/300)*80 + (_wi_speed/300)*50 + (_wi_feed/50)*20
+                _sig   = _base + 10*np.sin(np.linspace(0, 4*np.pi, 128)) + _rng.normal(0, 5, 128)
 
-                # ── Stage 2 : LSTM Energy DNA encoding ────────────────────────
-                _wi_status.markdown(
-                    '<div style="font-size:0.82rem;color:#00d4ff;">'
-                    '🔋  Stage 2 / 5 — Encoding Energy DNA via LSTM Autoencoder...</div>',
+                _wi_stat.markdown(
+                    '<div style="color:#00d4ff;font-size:0.82rem;">'
+                    '&#9889; Stage 2/5 &#8212; Encoding Energy DNA via LSTM Autoencoder...</div>',
                     unsafe_allow_html=True,
                 )
                 _wi_prog.progress(30)
-                time.sleep(0.45)
-                _sig_mean = _sig.mean()
-                _sig_std  = float(_sig.std()) if float(_sig.std()) > 0 else 1.0
-                _sig_norm = (_sig - _sig_mean) / _sig_std
+                time.sleep(0.4)
+                _sm, _ss = _sig.mean(), max(float(_sig.std()), 1e-9)
+                _snorm   = (_sig - _sm) / _ss
 
                 _ae_path = os.path.join(MODELS_DIR, "lstm_autoencoder.pth")
                 if os.path.exists(_ae_path):
-                    _ae_wi = LSTMAutoencoder(
-                        ENERGY_INPUT_DIM, ENERGY_HIDDEN_DIM,
-                        ENERGY_LATENT_DIM, ENERGY_NUM_LAYERS,
-                    )
-                    _ae_wi.load_state_dict(
-                        torch.load(_ae_path, map_location="cpu", weights_only=True)
-                    )
-                    _ae_wi.eval()
+                    _ae = LSTMAutoencoder(ENERGY_INPUT_DIM, ENERGY_HIDDEN_DIM,
+                                         ENERGY_LATENT_DIM, ENERGY_NUM_LAYERS)
+                    _ae.load_state_dict(torch.load(_ae_path, map_location="cpu", weights_only=True))
+                    _ae.eval()
                     with torch.no_grad():
-                        _x_t   = torch.tensor(
-                            _sig_norm, dtype=torch.float32
-                        ).unsqueeze(0).unsqueeze(2)          # (1, 128, 1)
-                        _recon_t, _latent_t = _ae_wi(_x_t)
-                        _emb_wi    = _latent_t.squeeze(0).numpy()          # (16,)
-                        _recon_err = float(
-                            torch.mean((_recon_t - _x_t) ** 2).item()
-                        )
+                        _xt = torch.tensor(_snorm, dtype=torch.float32).unsqueeze(0).unsqueeze(2)
+                        _rt, _lt = _ae(_xt)
+                        _emb_wi  = _lt.squeeze(0).numpy()
+                        _recon_wi = float(torch.mean((_rt - _xt) ** 2).item())
                 else:
-                    _emb_wi    = np.zeros(16, dtype=np.float32)
-                    _recon_err = 0.0
+                    _emb_wi = np.zeros(16, dtype=np.float32); _recon_wi = 0.0
 
-                # ── Stage 3 : Genome assembly ──────────────────────────────────
-                _wi_status.markdown(
-                    '<div style="font-size:0.82rem;color:#00d4ff;">'
-                    '🧬  Stage 3 / 5 — Assembling Batch Genome (25-D)...</div>',
+                _wi_stat.markdown(
+                    '<div style="color:#00d4ff;font-size:0.82rem;">'
+                    '&#129516; Stage 3/5 &#8212; Assembling Batch Genome (25D)...</div>',
                     unsafe_allow_html=True,
                 )
                 _wi_prog.progress(52)
-                time.sleep(0.4)
+                time.sleep(0.35)
                 _genome_wi = np.array(
-                    [
-                        float(_wi_temp), float(_wi_pressure), float(_wi_speed),
-                        float(_wi_feed), float(_wi_humidity),
-                        float(_wi_density), float(_wi_hardness), float(_wi_grade),
-                        *_emb_wi.tolist(),
-                        float(_wi_carbon),
-                    ],
+                    [float(_wi_temp), float(_wi_pressure), float(_wi_speed),
+                     float(_wi_feed), float(_wi_humidity),
+                     float(_wi_density), float(_wi_hardness), float(_wi_grade),
+                     *_emb_wi.tolist(), float(_wi_carbon)],
                     dtype=np.float32,
-                )  # (25,)
+                )
 
-                # ── Stage 4 : Prediction model ─────────────────────────────────
-                _wi_status.markdown(
-                    '<div style="font-size:0.82rem;color:#00d4ff;">'
-                    '🔮  Stage 4 / 5 — Running Multi-Target Prediction Model...</div>',
+                _wi_stat.markdown(
+                    '<div style="color:#00d4ff;font-size:0.82rem;">'
+                    '&#128302; Stage 4/5 &#8212; Running Multi-Target Predictor...</div>',
                     unsafe_allow_html=True,
                 )
                 _wi_prog.progress(72)
-                time.sleep(0.4)
+                time.sleep(0.35)
                 _pred_path = os.path.join(MODELS_DIR, "predictor.pkl")
                 if os.path.exists(_pred_path):
                     with open(_pred_path, "rb") as _pf:
                         _pred_wi = pickle.load(_pf)
-                    _preds_wi = _pred_wi.predict(_genome_wi.reshape(1, -1))[0]
-                    _py = float(_preds_wi[0])
-                    _pq = float(_preds_wi[1])
-                    _pe = float(_preds_wi[2])
+                    _pw = _pred_wi.predict(_genome_wi.reshape(1, -1))[0]
+                    _py, _pq, _pe = float(_pw[0]), float(_pw[1]), float(_pw[2])
                 else:
-                    _py = 0.5 + (_wi_temp  / 300) * 0.4
-                    _pq = 0.4 + (_wi_speed / 300) * 0.5
-                    _pe = 50  + (_wi_temp  / 300) * 450
+                    _py = 0.5 + (_wi_temp/300)*0.4
+                    _pq = 0.4 + (_wi_speed/300)*0.5
+                    _pe = 50  + (_wi_temp/300)*450
 
-                # ── Stage 5 : Risk assessment ──────────────────────────────────
-                _wi_status.markdown(
-                    '<div style="font-size:0.82rem;color:#00d4ff;">'
-                    '🌍  Stage 5 / 5 — Carbon Zone & Anomaly Risk Assessment...</div>',
+                _wi_stat.markdown(
+                    '<div style="color:#00d4ff;font-size:0.82rem;">'
+                    '&#127757; Stage 5/5 &#8212; Carbon Zone + Anomaly Risk...</div>',
                     unsafe_allow_html=True,
                 )
                 _wi_prog.progress(92)
-                time.sleep(0.35)
+                time.sleep(0.3)
 
-                _wi_zone   = classify_carbon_zone(float(_wi_carbon))
-                _wi_anomaly = _recon_err > 0.199084
-                _anom_lbl   = "⚠️  ANOMALY DETECTED"   if _wi_anomaly else "✅  NORMAL OPERATION"
-                _anom_col   = "#ff4b4b"                 if _wi_anomaly else "#00ff88"
-                _zc         = ZONE_COLORS[_wi_zone]
+                _wi_zone = classify_carbon_zone(float(_wi_carbon))
+                _wi_anom = _recon_wi > 0.199084
+                _wa_col  = _RED    if _wi_anom else _GREEN
+                _wa_lbl  = "&#9888; ANOMALY RISK" if _wi_anom else "&#10003; NORMAL OPERATION"
+                _wzc     = ZONE_COLORS[_wi_zone]
 
                 _wi_prog.progress(100)
-                time.sleep(0.15)
-                _wi_status.empty()
-                _wi_prog.empty()
+                time.sleep(0.1)
+                _wi_stat.empty(); _wi_prog.empty()
 
-                # ── Result card ────────────────────────────────────────────────
-                _wi_result.markdown(
+                _wi_out.markdown(
                     f'<div style="background:linear-gradient(135deg,'
-                    f'rgba(0,212,255,0.07),rgba(0,255,136,0.04));'
-                    f'border:1px solid rgba(0,212,255,0.25);border-radius:16px;'
-                    f'padding:22px 24px;">'
+                    f'rgba(0,212,255,0.06),rgba(0,255,136,0.03));'
+                    f'border:1px solid rgba(0,212,255,0.22);'
+                    f'border-radius:14px;padding:22px 22px;">'
+                    # header row
                     f'<div style="display:flex;justify-content:space-between;'
                     f'align-items:center;margin-bottom:16px;">'
-                    f'<div style="font-size:1.0rem;font-weight:700;color:#00d4ff;'
+                    f'<div style="font-size:0.95rem;font-weight:700;color:{_CYAN};'
                     f'letter-spacing:0.05em;">SIMULATION RESULT</div>'
-                    f'<div style="font-size:0.72rem;padding:3px 14px;border-radius:20px;'
-                    f'border:1px solid {_anom_col};color:{_anom_col};font-weight:600;">'
-                    f'{_anom_lbl}</div></div>'
-                    f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;'
-                    f'gap:10px;margin-bottom:12px;">'
+                    f'<div style="font-size:0.7rem;padding:3px 14px;border-radius:20px;'
+                    f'border:1px solid {_wa_col};color:{_wa_col};'
+                    f'font-weight:600;">{_wa_lbl}</div></div>'
+                    # 3 main KPIs
+                    f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;'
+                    f'margin-bottom:12px;">'
+                    + "".join([
+                        f'<div style="background:rgba(255,255,255,0.04);border-radius:10px;'
+                        f'padding:12px;text-align:center;">'
+                        f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.34);'
+                        f'text-transform:uppercase;letter-spacing:0.1em;">{kl}</div>'
+                        f'<div style="font-size:1.35rem;font-weight:700;color:{kc};'
+                        f'font-family:JetBrains Mono,monospace;">{kv}</div></div>'
+                        for kl, kv, kc in [
+                            ("Pred Yield",   f"{_py:.4f}",      _CYAN),
+                            ("Pred Quality", f"{_pq:.4f}",      _GREEN),
+                            ("Pred Energy",  f"{_pe:.0f} kWh",  _YELLOW),
+                        ]
+                    ])
+                    + f'</div>'
+                    # zone + risk row
+                    f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;'
+                    f'margin-bottom:14px;">'
                     f'<div style="background:rgba(255,255,255,0.04);border-radius:10px;'
-                    f'padding:12px;text-align:center;">'
-                    f'<div style="font-size:0.62rem;color:rgba(255,255,255,0.36);'
-                    f'text-transform:uppercase;letter-spacing:0.1em;">Pred. Yield</div>'
-                    f'<div style="font-size:1.45rem;font-weight:700;color:#00d4ff;'
-                    f'font-family:\'JetBrains Mono\',monospace;">{_py:.4f}</div></div>'
-                    f'<div style="background:rgba(255,255,255,0.04);border-radius:10px;'
-                    f'padding:12px;text-align:center;">'
-                    f'<div style="font-size:0.62rem;color:rgba(255,255,255,0.36);'
-                    f'text-transform:uppercase;letter-spacing:0.1em;">Pred. Quality</div>'
-                    f'<div style="font-size:1.45rem;font-weight:700;color:#00ff88;'
-                    f'font-family:\'JetBrains Mono\',monospace;">{_pq:.4f}</div></div>'
-                    f'<div style="background:rgba(255,255,255,0.04);border-radius:10px;'
-                    f'padding:12px;text-align:center;">'
-                    f'<div style="font-size:0.62rem;color:rgba(255,255,255,0.36);'
-                    f'text-transform:uppercase;letter-spacing:0.1em;">Pred. Energy</div>'
-                    f'<div style="font-size:1.45rem;font-weight:700;color:#ffd600;'
-                    f'font-family:\'JetBrains Mono\',monospace;">{_pe:.0f} kWh</div></div>'
-                    f'</div>'
-                    f'<div style="display:grid;grid-template-columns:1fr 1fr;'
-                    f'gap:10px;margin-bottom:14px;">'
-                    f'<div style="background:rgba(255,255,255,0.04);border-radius:10px;'
-                    f'padding:12px;text-align:center;">'
-                    f'<div style="font-size:0.62rem;color:rgba(255,255,255,0.36);'
+                    f'padding:10px;text-align:center;">'
+                    f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.34);'
                     f'text-transform:uppercase;letter-spacing:0.1em;">Carbon Zone</div>'
-                    f'<div style="font-size:1.05rem;font-weight:700;color:{_zc};'
-                    f'margin-top:3px;">{ZONE_EMOJI[_wi_zone]}  {_wi_zone}</div></div>'
+                    f'<div style="font-size:1.0rem;font-weight:700;color:{_wzc};">'
+                    f'{_wi_zone}</div></div>'
                     f'<div style="background:rgba(255,255,255,0.04);border-radius:10px;'
-                    f'padding:12px;text-align:center;">'
-                    f'<div style="font-size:0.62rem;color:rgba(255,255,255,0.36);'
+                    f'padding:10px;text-align:center;">'
+                    f'<div style="font-size:0.6rem;color:rgba(255,255,255,0.34);'
                     f'text-transform:uppercase;letter-spacing:0.1em;">Anomaly Score</div>'
-                    f'<div style="font-size:1.05rem;font-weight:700;color:{_anom_col};'
-                    f'font-family:\'JetBrains Mono\',monospace;margin-top:3px;">'
-                    f'{_recon_err:.5f}</div></div>'
+                    f'<div style="font-size:1.0rem;font-weight:700;color:{_wa_col};'
+                    f'font-family:JetBrains Mono,monospace;">{_recon_wi:.5f}</div></div>'
                     f'</div>'
-                    f'<div style="font-size:0.69rem;color:rgba(255,255,255,0.25);'
-                    f'border-top:1px solid rgba(255,255,255,0.07);padding-top:9px;">'
-                    f'Genome [{chr(34)} {chr(34).join(f"{v:.2f}" for v in _genome_wi[:5])}'  
-                    f' … {_genome_wi[24]:.0f}] '
-                    f'&nbsp;·&nbsp; Threshold = 0.1991 '
-                    f'&nbsp;·&nbsp; In-memory only — DB unchanged</div>'
+                    # genome strip
+                    f'<div style="font-size:0.66rem;color:rgba(255,255,255,0.22);'
+                    f'border-top:1px solid rgba(255,255,255,0.07);padding-top:8px;">'
+                    f'Genome: [{", ".join(f"{v:.2f}" for v in _genome_wi[:5])} ... '
+                    f'{_genome_wi[24]:.0f}]'
+                    f' &#183; threshold = 0.1991 &#183; in-memory only</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
 
-                # ── Genome fingerprint bar chart ───────────────────────────────
-                _wi_norm_g = _genome_wi / (np.abs(_genome_wi).max() or 1)
-                _wi_fg = go.Figure(go.Bar(
-                    x=GENOME_LABELS, y=_genome_wi.tolist(),
-                    marker=dict(
-                        color=_wi_norm_g.tolist(),
-                        colorscale=[[0, "#0050c8"], [0.5, "#00d4ff"], [1, "#00ff88"]],
-                        showscale=False,
-                    ),
-                ))
-                _wi_fg.update_layout(
-                    title="Simulated Batch Genome Fingerprint (25-D)",
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    font={"color": "rgba(255,255,255,0.65)", "family": "Inter"},
-                    height=210, margin=dict(l=10, r=10, t=34, b=5),
-                    xaxis=dict(tickfont=dict(size=8.5), gridcolor="rgba(255,255,255,0.05)"),
-                    yaxis=dict(gridcolor="rgba(255,255,255,0.06)"),
-                )
-                st.plotly_chart(_wi_fg, use_container_width=True,
-                                config={"displayModeBar": False})
-
-            except Exception as _wi_ex:
-                _wi_prog.empty()
-                _wi_status.error(f"Simulation error: {_wi_ex}")
+            except Exception as _wi_e:
+                _wi_prog.empty(); _wi_stat.error(f"Simulation error: {_wi_e}")
         else:
             st.markdown(
                 '<div style="display:flex;align-items:center;justify-content:center;'
-                'padding:60px 24px;text-align:center;'
+                'padding:60px 20px;text-align:center;'
                 'background:rgba(255,255,255,0.02);'
                 'border:1px dashed rgba(255,255,255,0.1);border-radius:14px;">'
                 '<div>'
-                '<div style="font-size:2.4rem;margin-bottom:10px;">🔬</div>'
-                '<div style="font-size:0.92rem;font-weight:600;'
-                'color:rgba(255,255,255,0.42);">What-If Simulator Ready</div>'
-                '<div style="font-size:0.75rem;color:rgba(255,255,255,0.22);margin-top:8px;">'
-                'Set process parameters on the left, then click<br>'
-                '<strong style="color:rgba(0,212,255,0.55);">'
-                '▶ Run Full Pipeline Simulation</strong></div>'
+                '<div style="font-size:2.2rem;margin-bottom:10px;">&#128300;</div>'
+                '<div style="font-size:0.88rem;font-weight:600;'
+                'color:rgba(255,255,255,0.38);">What-If Lab Ready</div>'
+                '<div style="font-size:0.73rem;color:rgba(255,255,255,0.2);margin-top:8px;">'
+                'Set parameters on the left, then click<br>'
+                '<strong style="color:rgba(0,212,255,0.5);">'
+                '&#9654; Run Full Pipeline Simulation</strong></div>'
                 '</div></div>',
                 unsafe_allow_html=True,
             )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ══ REAL-TIME BATCH STREAM ═════════════════════════════════════════════════
-    st.markdown('<div class="slabel">Real-Time Batch Stream — Last 20 Dispatched</div>',
-                unsafe_allow_html=True)
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 8 &#10143; LIVE BATCH FEED
+    # ══════════════════════════════════════════════════════════════════════
+    st.markdown(
+        '<div class="slabel">&#128225; Live Batch Feed &#8212; Last 20 Dispatched with ML Flags</div>',
+        unsafe_allow_html=True,
+    )
 
-    _str_c1, _str_c2 = st.columns([1, 9])
-    with _str_c1:
-        if st.button("🔄 Refresh", key="dt_refresh"):
-            st.cache_data.clear()
-            st.rerun()
+    _fc1, _fc2 = st.columns([1, 9])
+    with _fc1:
+        if st.button("&#128260; Refresh", key="dt_feed_refresh"):
+            st.cache_data.clear(); st.rerun()
 
     try:
-        _stconn = sqlite3.connect(DB_PATH)
-        df_stream = pd.read_sql_query(
-            """SELECT b.batch_id, b.yield, b.quality, b.energy_consumption,
-                      b.carbon_intensity, b.temperature, b.speed,
-                      COALESCE(ee.is_anomaly, 0)  AS is_anomaly,
-                      COALESCE(ee.recon_error, 0)  AS recon_error
+        _fconn = sqlite3.connect(DB_PATH)
+        df_feed = pd.read_sql_query(
+            """SELECT b.batch_id,
+                      ROUND(b.yield,4)               AS yield,
+                      ROUND(b.quality,4)             AS quality,
+                      ROUND(b.energy_consumption,1)  AS energy_kwh,
+                      ROUND(b.carbon_intensity,1)    AS carbon_ci,
+                      ROUND(b.temperature,1)         AS temp_c,
+                      ROUND(b.speed,0)               AS speed_rpm,
+                      COALESCE(ee.is_anomaly,0)      AS is_anomaly,
+                      COALESCE(ee.recon_error,0)     AS recon_error
                FROM batches b
                LEFT JOIN energy_embeddings ee ON b.batch_id = ee.batch_id
                ORDER BY b.batch_id DESC LIMIT 20""",
-            _stconn,
+            _fconn,
         )
-        _stconn.close()
-        df_stream["carbon_intensity"] = pd.to_numeric(df_stream["carbon_intensity"], errors="coerce")
-        df_stream["recon_error"]      = pd.to_numeric(df_stream["recon_error"],      errors="coerce")
-        df_stream["is_anomaly"]       = pd.to_numeric(df_stream["is_anomaly"],       errors="coerce").fillna(0).astype(int)
+        _fconn.close()
     except Exception:
-        df_stream = pd.DataFrame()
+        df_feed = pd.DataFrame()
 
-    if len(df_stream) > 0:
-        df_stream["Zone"]   = df_stream["carbon_intensity"].apply(classify_carbon_zone)
-        df_stream["Status"] = df_stream["is_anomaly"].apply(lambda x: "⚠️ Anomaly" if x == 1 else "✅ Normal")
-        _ds = df_stream[["batch_id","yield","quality","energy_consumption",
-                          "carbon_intensity","temperature","speed","Zone","Status","recon_error"]].copy()
-        _ds.columns = ["Batch ID","Yield","Quality","Energy (kWh)","Carbon CI",
-                       "Temp (°C)","Speed (rpm)","Zone","Status","Recon Err"]
-        for _col in ["Yield","Quality","Carbon CI","Recon Err"]:
-            _ds[_col] = _ds[_col].round(4)
-        _ds["Energy (kWh)"] = _ds["Energy (kWh)"].round(1)
-        _ds["Temp (°C)"]    = _ds["Temp (°C)"].round(1)
-        _ds["Speed (rpm)"]  = _ds["Speed (rpm)"].round(0).astype(int)
-        st.dataframe(_ds, use_container_width=True, hide_index=True, height=390)
+    if len(df_feed) > 0:
+        df_feed["is_anomaly"] = (
+            pd.to_numeric(df_feed["is_anomaly"], errors="coerce").fillna(0).astype(int)
+        )
+        df_feed["recon_error"] = pd.to_numeric(df_feed["recon_error"], errors="coerce").round(5)
+        df_feed["Zone"]   = df_feed["carbon_ci"].apply(classify_carbon_zone)
+        df_feed["Status"] = df_feed["is_anomaly"].apply(
+            lambda x: "ANOMALY" if x == 1 else "Normal"
+        )
+        df_feed["ML Verdict"] = df_feed.apply(
+            lambda r: f"Err={r['recon_error']:.4f} {'[!]' if r['is_anomaly'] else '[ok]'}",
+            axis=1,
+        )
+        _display = df_feed[[
+            "batch_id", "yield", "quality", "energy_kwh",
+            "carbon_ci", "temp_c", "speed_rpm", "Zone", "Status", "ML Verdict"
+        ]].copy()
+        _display.columns = [
+            "Batch ID", "Yield", "Quality", "Energy (kWh)",
+            "Carbon CI", "Temp (degC)", "Speed (rpm)", "Zone", "Status", "ML Verdict"
+        ]
+        st.dataframe(_display, use_container_width=True, hide_index=True, height=390)
         st.markdown(
-            '<div style="font-size:0.73rem;color:rgba(255,255,255,0.28);margin-top:5px;">'
-            '↑ Last 20 batches ordered by Batch ID descending. Click Refresh to reload from DB.</div>',
+            '<div style="font-size:0.7rem;color:rgba(255,255,255,0.25);margin-top:4px;">'
+            'Last 20 batches, newest first. Click Refresh to reload from DB.</div>',
             unsafe_allow_html=True,
         )
     else:
-        st.info("No batch stream data available.")
+        st.info("No batch feed data available.")
