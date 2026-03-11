@@ -80,3 +80,6 @@ __pycache__/
 *.pyc
 *.db
 logs/
+
+_st_bg.txt
+_streamlit_err.txt
